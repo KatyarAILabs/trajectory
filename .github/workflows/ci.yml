@@ -18,12 +18,17 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
+          go-version: '1.26'
           cache: true
 
       - run: make build
       - run: make test
       - run: make lint
+
+      # Assembly, redaction and the sink all mutate shared counters from
+      # multiple goroutines. A data race there is a wrong metric or a lost
+      # episode, neither of which surfaces as a test failure on its own.
+      - run: go test -race ./...
 
   generated:
     # The protos are the source of truth. A PR that edits a .proto without
@@ -34,7 +39,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
+          go-version: '1.26'
           cache: true
       - uses: arduino/setup-protoc@v3
         with:
@@ -53,10 +58,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
+          go-version: '1.26'
           cache: true
 
-      - run: make tools
       - run: make licences
 
   sbom:
@@ -67,7 +71,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
+          go-version: '1.26'
           cache: true
 
       - uses: anchore/sbom-action@v0

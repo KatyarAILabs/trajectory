@@ -4,8 +4,26 @@ Capture agent trajectories at a fidelity sufficient for offline replay and
 scoring, redact what must never leave the perimeter, and land it in cheap,
 durable, queryable storage — with no opinion about what reads it afterwards.
 
-> **Status: pre-alpha.** The schema is drafted and the contract is enforced in
-> CI, but no collector exists yet. See [the build plan](docs/PLAN.md).
+> **Status: pre-alpha, and not yet useful in production.** A walking skeleton
+> runs end to end — OTLP in, Parquet and content-addressed blobs out — but
+> there is no disk buffer, no S3 sink, no gRPC and no retry. Nothing is durable
+> across a sink outage yet. See [the build plan](docs/PLAN.md).
+
+## Try it
+
+```sh
+make demo
+```
+
+That runs the collector against a local filesystem sink, sends it a recorded
+OpenInference trajectory, and reconstructs that trajectory from the files on
+disk with DuckDB — no cloud account, no credentials, no Kubernetes (UC-5).
+
+What it shows: a four-step trajectory including a tool-call retry that stays a
+branch rather than being flattened; a 12 KB prompt externalised to a
+content-addressed blob; a seeded email present only as its HMAC token, with the
+same token in both steps that touched it, so it is still joinable; and the
+ticket id extracted into `entity_keys`.
 
 ## Why
 
@@ -39,7 +57,9 @@ breaks every reader.
 | `spec/` | Schema: protobuf source of truth, generated JSON Schema, conformance tests, sample dataset |
 | `pkg/record/` | Parquet row types — the storage contract |
 | `gen/go/` | Generated Go types — the wire contract. Do not edit by hand. |
-| `collector/` | Sources, processors, sinks, buffer, CLI |
+| `collector/` | Sources, processors, sinks, buffer |
+| `cmd/cc/` | The CLI |
+| `tools/` | Code generation, the licence gate, the traffic generator |
 | `otelcol/` | OpenTelemetry Collector components and builder manifest |
 | `importers/` | langfuse, phoenix, langsmith, jsonl, parquet |
 | `mappings/` | Declarative source mappings (litellm, portkey, helicone) |
@@ -61,6 +81,10 @@ Two guards are load-bearing and will fail your PR:
   `make golden` and expect the diff to be reviewed.
 - **`make licences`** rejects a non-permissive transitive dependency. It runs
   from the first commit so one can never become established.
+- **`make acceptance`** is DoD-1, the end-to-end test that defines the walking
+  skeleton as working. It asserts against files on disk rather than the
+  pipeline'"'"'s own accounting — including that a seeded secret appears in no
+  file anywhere under the sink root.
 
 ## Licence
 

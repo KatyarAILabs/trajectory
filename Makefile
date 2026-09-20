@@ -14,7 +14,7 @@ all: generate build test lint
 .PHONY: tools
 tools: ## Install pinned code-generation and audit tools into ./bin
 	GOBIN=$(BIN) go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.12
-	GOBIN=$(BIN) go install github.com/google/go-licenses@latest
+	@echo "licence gate is ./tools/licensecheck; no external tool needed"
 
 .PHONY: generate
 generate: ## Regenerate Go types and JSON Schema from the protos
@@ -47,8 +47,7 @@ verify-generated: generate ## Fail if committed generated files are stale
 
 .PHONY: licences
 licences: ## F-12.4 / §13: permissive licences only
-	go-licenses check ./... \
-		--allowed_licenses=Apache-2.0,MIT,BSD-2-Clause,BSD-3-Clause,ISC,MPL-2.0,Unlicense,Zlib
+	go run ./tools/licensecheck
 
 .PHONY: sbom
 sbom: ## F-12.4: SBOM per release
@@ -58,3 +57,11 @@ sbom: ## F-12.4: SBOM per release
 .PHONY: help
 help:
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
+
+.PHONY: demo
+demo: ## UC-5: run the collector locally, send a trajectory, reconstruct it
+	./scripts/demo.sh
+
+.PHONY: acceptance
+acceptance: ## Run the DoD-1 end-to-end acceptance test
+	go test ./collector/acceptance/ -v -run TestDoD1

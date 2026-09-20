@@ -141,3 +141,72 @@ Inherited from spec §2.2 and unchanged: CDC connectors, outcome joins, reward c
 | A recorded OpenInference span stream to use as the golden fixture | Phase 1 acceptance | Can be synthesised, but a real one from a partner is worth more. |
 | Confirmation of the library table in §7 | Phase 1 | Swapping the Parquet or buffer library later is expensive. |
 | Target instance size for the §13 throughput number | Phase 3 | Spec says 5k spans/s at 2 vCPU / 2 GB; confirm that is the real deployment shape. |
+
+---
+
+## Appendix A — Phase 1 build notes
+
+Written during the phase, not before it. These are the things the plan did not
+anticipate.
+
+### A.1 F-3.2 and F-3.3 conflict, and the spec does not say so
+
+F-3.3 says emit on an explicit terminal event or window expiry. F-3.2 says
+tolerate out-of-order arrival within the window. Taken literally together they
+are contradictory: emitting the instant a terminal marker arrives gives an
+episode **zero** tolerance for out-of-order arrival, so any span still in
+flight lands after emit and starts a bogus second episode.
+
+This was found by the shuffle/duplicate harness, which failed on roughly 30 of
+50 seeds before the fix. It would not have been found by an ordered-stream
+test, which is exactly why F-3's acceptance criterion is written the way it is.
+
+**Resolution:** a terminal marker makes an episode *eligible* to close, after a
+short settle period (`assembly.settle_after_terminal`, default 5s), rather than
+closing it immediately. Waiting the full window would honour F-3.2 but blow the
+p95 < 60s ingest-to-durable target in §13 for every well-behaved producer.
+
+**Spec change needed:** F-3.3 should be reworded, and the knob documented. It
+is currently a collector behaviour that the requirements do not describe.
+
+### A.2 Ordering must not derive from arrival order
+
+The corollary of A.1. Any state derived from the order spans arrived in leaks
+into the output and breaks the shuffle criterion. Two places had to be fixed:
+the step ordering (now timestamp, then span id as a total-order tiebreak) and
+the identity of spans that arrive with no span id (now a content hash, so a
+redelivery collapses onto the same key instead of duplicating).
+
+### A.3 The licence gate had to be rewritten
+
+`go-licenses` breaks against the Go 1.26 standard library — it reports
+`Package bytes does not have module info` and exits non-zero regardless of the
+actual licences. A supply-chain gate that fails spuriously is worse than no
+gate, because the first thing anyone does with a noisy gate is switch it off.
+
+Replaced with `tools/licensecheck`, ~150 lines, no dependencies, classifying by
+distinctive licence phrases and **failing closed** on anything it cannot
+positively identify. It has its own unit tests, including that copyleft wins
+over permissive boilerplate in a mixed file.
+
+### A.4 Payloads are JSON envelopes, not concatenated strings
+
+Entity extraction addresses payloads with JSONPath from config (`$.args.id`,
+`$.result.metadata.order_id` per §10). That only works if args and result stay
+separately addressable, so normalisation emits `{"args":…,"result":…}` for tool
+steps and `{"input":…,"output":…}` otherwise. A value that is itself JSON is
+embedded as JSON so paths reach into it; anything else is embedded as the exact
+string the producer sent.
+
+**Spec gap:** §7.2 describes `content_inline` only as "payload", and does not
+say it is structured. Readers need to know this.
+
+### A.5 Deferred, with the reason
+
+| Deferred | Why it is safe for now | When it bites |
+|---|---|---|
+| `pdata` forces Go 1.26 | Released and stable | A contributor on an older toolchain |
+| Assembly expiry is an O(open) scan per tick | Cheap at the default 50k in-flight on a 1s ticker | First thing to revisit if that bound is raised |
+| Late spans after emit are counted, not patched | The counter makes the loss visible rather than silent | F-3.5 patch records, Phase 2 |
+| The JSON Schema advertises two enum spellings; no decoder honours both yet | Nothing decodes JSON episodes yet | The first `POST /v1/episodes` handler, Phase 2 |
+| No unit tests for the sink, OTLP receiver, service or telemetry | All four are exercised end-to-end by DoD-1 | A refactor that DoD-1 happens not to cover |

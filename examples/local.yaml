@@ -1,0 +1,62 @@
+# A minimal local-development config (UC-5): no cloud account, no credentials,
+# no Kubernetes. Run it, send OTLP traces at it, inspect the Parquet with
+# DuckDB.
+#
+#   export CC_HMAC_KEY=dev-key-not-for-production
+#   cc run -config examples/local.yaml
+
+schema_version: "0.1.0"
+tenant: dev
+
+sources:
+  - name: otlp
+    type: otlp
+    http:
+      listen: "127.0.0.1:4318"
+
+assembly:
+  session_key: ["session.id", "gen_ai.conversation.id", "trace_id"]
+  window: 5m
+  settle_after_terminal: 5s
+  max_in_flight: 10000
+
+redaction:
+  # Deny-by-default: only the paths listed below survive. Everything else is
+  # dropped before anything is written.
+  default: deny
+  on_error: quarantine
+  allow:
+    - "steps[*].content_inline"
+    - "steps[*].raw"
+  rules:
+    - id: email
+      match:
+        regex: "[\\w.+-]+@[\\w-]+\\.[\\w.]+"
+      action: tokenize
+    - id: card
+      match:
+        regex: "\\b(?:\\d[ -]*?){13,16}\\b"
+      action: drop
+  tokenization:
+    # The key comes from the environment, never from this file.
+    key_env: CC_HMAC_KEY
+
+entities:
+  - tool: zendesk.update_ticket
+    keys:
+      ticket_id: "$.args.id"
+  - tool: stripe.create_refund
+    keys:
+      order_id: "$.result.metadata.order_id"
+
+sinks:
+  - name: local
+    type: fs
+    dir: ./var/lake
+    partition_by: ["dt", "tenant", "task_type"]
+    blob_threshold_bytes: 8192
+
+telemetry:
+  metrics:
+    listen: "127.0.0.1:9464"
+  log_level: info

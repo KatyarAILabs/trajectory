@@ -1,0 +1,8 @@
+message Label {
+	required binary episode_id (STRING);
+	required int32 step_idx (INT(32,true));
+	required binary kind (STRING);
+	required binary value (STRING);
+	required binary actor (STRING);
+	required int64 at (TIMESTAMP(isAdjustedToUTC=true,unit=MICROS));
+}

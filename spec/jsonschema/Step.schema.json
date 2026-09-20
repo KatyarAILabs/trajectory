@@ -1,0 +1,231 @@
+{
+  "$defs": {
+    "Error": {
+      "additionalProperties": false,
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "message"
+      ],
+      "type": "object"
+    },
+    "Params": {
+      "additionalProperties": false,
+      "properties": {
+        "max_tokens": {
+          "type": "integer"
+        },
+        "seed": {
+          "type": [
+            "string",
+            "integer"
+          ]
+        },
+        "stop": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "temperature": {
+          "type": "number"
+        },
+        "top_p": {
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "TokenCounts": {
+      "additionalProperties": false,
+      "properties": {
+        "cached": {
+          "type": [
+            "string",
+            "integer"
+          ]
+        },
+        "input": {
+          "type": [
+            "string",
+            "integer"
+          ]
+        },
+        "output": {
+          "type": [
+            "string",
+            "integer"
+          ]
+        },
+        "reasoning": {
+          "type": [
+            "string",
+            "integer"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "TokenSpan": {
+      "additionalProperties": false,
+      "properties": {
+        "end": {
+          "type": [
+            "string",
+            "integer"
+          ]
+        },
+        "start": {
+          "type": [
+            "string",
+            "integer"
+          ]
+        },
+        "trainable": {
+          "enum": [
+            "TRAINABLE_UNSPECIFIED",
+            "TRAINABLE_UNKNOWN",
+            "TRAINABLE_TRUE",
+            "TRAINABLE_FALSE",
+            "unknown",
+            "true",
+            "false"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "trainable"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://trajectory.dev/schema/v0.1.0/Step.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "args_hash": {
+      "type": "string"
+    },
+    "attempt": {
+      "type": "integer"
+    },
+    "content_inline": {
+      "type": "string"
+    },
+    "content_ref": {
+      "type": "string"
+    },
+    "episode_id": {
+      "type": "string"
+    },
+    "error": {
+      "$ref": "#/$defs/Error"
+    },
+    "finish_reason": {
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "KIND_UNSPECIFIED",
+        "KIND_LLM",
+        "KIND_TOOL",
+        "KIND_RETRIEVAL",
+        "KIND_HUMAN",
+        "KIND_OTHER",
+        "llm",
+        "tool",
+        "retrieval",
+        "human",
+        "other"
+      ],
+      "type": "string"
+    },
+    "latency_ms": {
+      "type": "integer"
+    },
+    "logprobs_ref": {
+      "type": "string"
+    },
+    "model": {
+      "type": "string"
+    },
+    "params": {
+      "$ref": "#/$defs/Params"
+    },
+    "parent_idx": {
+      "type": "integer"
+    },
+    "provider": {
+      "type": "string"
+    },
+    "raw": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "type": "object"
+    },
+    "role": {
+      "type": "string"
+    },
+    "started_at": {
+      "type": [
+        "string",
+        "integer"
+      ]
+    },
+    "step_idx": {
+      "type": "integer"
+    },
+    "token_counts": {
+      "$ref": "#/$defs/TokenCounts"
+    },
+    "token_spans": {
+      "items": {
+        "$ref": "#/$defs/TokenSpan"
+      },
+      "type": "array"
+    },
+    "tool_name": {
+      "type": "string"
+    },
+    "tool_version": {
+      "type": "string"
+    },
+    "trainable": {
+      "enum": [
+        "TRAINABLE_UNSPECIFIED",
+        "TRAINABLE_UNKNOWN",
+        "TRAINABLE_TRUE",
+        "TRAINABLE_FALSE",
+        "unknown",
+        "true",
+        "false"
+      ],
+      "type": "string"
+    },
+    "truncated": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "episode_id",
+    "step_idx",
+    "attempt",
+    "kind",
+    "truncated",
+    "trainable",
+    "started_at"
+  ],
+  "title": "Step",
+  "type": "object"
+}

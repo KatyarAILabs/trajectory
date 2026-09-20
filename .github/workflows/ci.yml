@@ -1,0 +1,97 @@
+# Copyright The Trajectory Authors.
+# SPDX-License-Identifier: Apache-2.0
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - run: make build
+      - run: make test
+      - run: make lint
+
+  generated:
+    # The protos are the source of truth. A PR that edits a .proto without
+    # committing the regenerated Go and JSON Schema would publish a contract
+    # that does not match the code (F-10.3).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+      - uses: arduino/setup-protoc@v3
+        with:
+          version: '25.x'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - run: make tools
+      - run: make verify-generated
+
+  licences:
+    # §13 and F-12.4: permissive licences only. This gate exists from the first
+    # commit so a non-permissive transitive dependency can never become
+    # established and expensive to remove.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - run: make tools
+      - run: make licences
+
+  sbom:
+    # F-12.4: an SBOM accompanies every build, not only tagged releases, so a
+    # dependency change is visible in the PR that introduces it.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - uses: anchore/sbom-action@v0
+        with:
+          format: spdx-json
+          artifact-name: trajectory-sbom.spdx.json
+
+  dco:
+    # §18: DCO sign-off, not a CLA.
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check Signed-off-by on every commit
+        run: |
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          missing=0
+          while read -r sha; do
+            if ! git log -1 --format=%B "$sha" | grep -qi '^Signed-off-by: .\+ <.\+@.\+>'; then
+              echo "::error::commit $sha is missing a Signed-off-by line"
+              missing=1
+            fi
+          done < <(git rev-list "$base..$head")
+          exit $missing

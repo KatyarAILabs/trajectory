@@ -1,0 +1,14 @@
+# Default owners.
+*       @trajectory-project/maintainers
+
+# The schema is a published contract: additive-only within a major version,
+# with readers built against it. Changes here need a maintainer who can reason
+# about what a reader built on the previous version will see.
+/spec/                  @trajectory-project/maintainers
+/pkg/record/            @trajectory-project/maintainers
+/gen/                   @trajectory-project/maintainers
+
+# Redaction, tokenization and the buffer boundary. A mistake here is a data
+# leak, not a bug.
+/collector/processor/   @trajectory-project/maintainers
+/SECURITY.md            @trajectory-project/maintainers

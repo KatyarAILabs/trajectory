@@ -1,0 +1,40 @@
+{
+  "$id": "https://trajectory.dev/schema/v0.1.0/Reward.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "at": {
+      "type": [
+        "string",
+        "integer"
+      ]
+    },
+    "clauses": {
+      "additionalProperties": {
+        "type": "number"
+      },
+      "type": "object"
+    },
+    "episode_id": {
+      "type": "string"
+    },
+    "reward": {
+      "type": "number"
+    },
+    "verifier_id": {
+      "type": "string"
+    },
+    "verifier_version": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "episode_id",
+    "verifier_id",
+    "verifier_version",
+    "reward",
+    "at"
+  ],
+  "title": "Reward",
+  "type": "object"
+}

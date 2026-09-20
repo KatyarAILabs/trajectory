@@ -1,0 +1,54 @@
+// Copyright The Trajectory Authors.
+// SPDX-License-Identifier: Apache-2.0
+//
+// RESERVED SURFACE (§2.3, §7.4).
+//
+// These messages are defined and their tables are created empty. The collector
+// NEVER writes to them in v1. Joining trajectories to outcomes (N-2) and
+// computing rewards (N-3) are declared non-goals.
+//
+// They exist here because defining them costs nothing now, and it means the
+// join and the CT export arrive later as additive schema changes rather than a
+// major version bump that breaks every reader.
+//
+// Do not add a writer for these without reopening §2.2.
+
+syntax = "proto3";
+
+package trajectory.v1;
+
+option go_package = "github.com/trajectory-project/trajectory/gen/go/trajectory/v1;trajectoryv1";
+
+// Outcome is a business result keyed by an extracted entity key.
+//
+// occurred_at and observed_at are distinct because a future join needs as-of
+// semantics and watermarks; recording only one of them forecloses that.
+message Outcome {
+  string entity_key = 1;
+  string kind = 2;
+  string value = 3;
+  int64 occurred_at = 4;
+  int64 observed_at = 5;
+  string source = 6;
+}
+
+// Label is a human or machine annotation on a step.
+message Label {
+  string episode_id = 1;
+  int32 step_idx = 2;
+  string kind = 3;
+  string value = 4;
+  string actor = 5;
+  int64 at = 6;
+}
+
+// Reward is a verifier's score for an episode. The collector has no opinion
+// about correctness (N-3) and ships no verifier.
+message Reward {
+  string episode_id = 1;
+  string verifier_id = 2;
+  string verifier_version = 3;
+  double reward = 4;
+  map<string, double> clauses = 5;
+  int64 at = 6;
+}

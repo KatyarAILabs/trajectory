@@ -1,0 +1,8 @@
+message Outcome {
+	required binary entity_key (STRING);
+	required binary kind (STRING);
+	required binary value (STRING);
+	required int64 occurred_at (TIMESTAMP(isAdjustedToUTC=true,unit=MICROS));
+	required int64 observed_at (TIMESTAMP(isAdjustedToUTC=true,unit=MICROS));
+	required binary source (STRING);
+}

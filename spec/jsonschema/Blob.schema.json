@@ -1,0 +1,46 @@
+{
+  "$id": "https://trajectory.dev/schema/v0.1.0/Blob.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "bytes": {
+      "type": [
+        "string",
+        "integer"
+      ]
+    },
+    "content_type": {
+      "type": "string"
+    },
+    "encoding": {
+      "enum": [
+        "ENCODING_UNSPECIFIED",
+        "ENCODING_UTF8",
+        "ENCODING_BASE64",
+        "ENCODING_ZSTD",
+        "utf8",
+        "base64",
+        "zstd"
+      ],
+      "type": "string"
+    },
+    "first_seen_at": {
+      "type": [
+        "string",
+        "integer"
+      ]
+    },
+    "sha256": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "sha256",
+    "bytes",
+    "content_type",
+    "encoding",
+    "first_seen_at"
+  ],
+  "title": "Blob",
+  "type": "object"
+}

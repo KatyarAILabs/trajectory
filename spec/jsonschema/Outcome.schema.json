@@ -1,0 +1,41 @@
+{
+  "$id": "https://trajectory.dev/schema/v0.1.0/Outcome.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "entity_key": {
+      "type": "string"
+    },
+    "kind": {
+      "type": "string"
+    },
+    "observed_at": {
+      "type": [
+        "string",
+        "integer"
+      ]
+    },
+    "occurred_at": {
+      "type": [
+        "string",
+        "integer"
+      ]
+    },
+    "source": {
+      "type": "string"
+    },
+    "value": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "entity_key",
+    "kind",
+    "value",
+    "occurred_at",
+    "observed_at",
+    "source"
+  ],
+  "title": "Outcome",
+  "type": "object"
+}

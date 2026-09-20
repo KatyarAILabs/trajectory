@@ -1,0 +1,153 @@
+{
+  "$defs": {
+    "EntityKey": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "value"
+      ],
+      "type": "object"
+    },
+    "Error": {
+      "additionalProperties": false,
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "message"
+      ],
+      "type": "object"
+    },
+    "Fidelity": {
+      "additionalProperties": false,
+      "properties": {
+        "has_params": {
+          "type": "boolean"
+        },
+        "has_token_spans": {
+          "type": "boolean"
+        },
+        "has_tool_versions": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "has_params",
+        "has_token_spans",
+        "has_tool_versions"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://trajectory.dev/schema/v0.1.0/Episode.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "ended_at": {
+      "type": [
+        "string",
+        "integer"
+      ]
+    },
+    "entity_keys": {
+      "items": {
+        "$ref": "#/$defs/EntityKey"
+      },
+      "type": "array"
+    },
+    "episode_id": {
+      "type": "string"
+    },
+    "error": {
+      "$ref": "#/$defs/Error"
+    },
+    "fidelity": {
+      "$ref": "#/$defs/Fidelity"
+    },
+    "group_id": {
+      "type": "string"
+    },
+    "instrumentation": {
+      "type": "string"
+    },
+    "instrumentation_version": {
+      "type": "string"
+    },
+    "raw": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "type": "object"
+    },
+    "received_at": {
+      "type": [
+        "string",
+        "integer"
+      ]
+    },
+    "sampled_by": {
+      "type": "string"
+    },
+    "schema_version": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string"
+    },
+    "started_at": {
+      "type": [
+        "string",
+        "integer"
+      ]
+    },
+    "status": {
+      "enum": [
+        "STATUS_UNSPECIFIED",
+        "STATUS_COMPLETE",
+        "STATUS_TIMED_OUT",
+        "STATUS_EVICTED",
+        "STATUS_PATCHED",
+        "complete",
+        "timed_out",
+        "evicted",
+        "patched"
+      ],
+      "type": "string"
+    },
+    "step_count": {
+      "type": "integer"
+    },
+    "task_type": {
+      "type": "string"
+    },
+    "tenant": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "episode_id",
+    "tenant",
+    "source",
+    "status",
+    "started_at",
+    "received_at",
+    "step_count",
+    "schema_version"
+  ],
+  "title": "Episode",
+  "type": "object"
+}

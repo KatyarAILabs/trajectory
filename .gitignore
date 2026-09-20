@@ -1,0 +1,16 @@
+# Build output
+/bin/
+/dist/
+*.test
+
+# Local collector state — must never be committed: the disk buffer holds
+# records, and although redaction runs before the buffer (F-5.3), it is still
+# operational data.
+/var/
+*.parquet
+!pkg/record/testdata/**/*.parquet
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/

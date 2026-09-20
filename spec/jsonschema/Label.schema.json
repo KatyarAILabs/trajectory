@@ -1,0 +1,38 @@
+{
+  "$id": "https://trajectory.dev/schema/v0.1.0/Label.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "actor": {
+      "type": "string"
+    },
+    "at": {
+      "type": [
+        "string",
+        "integer"
+      ]
+    },
+    "episode_id": {
+      "type": "string"
+    },
+    "kind": {
+      "type": "string"
+    },
+    "step_idx": {
+      "type": "integer"
+    },
+    "value": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "episode_id",
+    "step_idx",
+    "kind",
+    "value",
+    "actor",
+    "at"
+  ],
+  "title": "Label",
+  "type": "object"
+}

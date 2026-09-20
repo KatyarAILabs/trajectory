@@ -1,0 +1,63 @@
+// Copyright The Trajectory Authors.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package trajectory.v1;
+
+import "trajectory/v1/common.proto";
+
+option go_package = "github.com/trajectory-project/trajectory/gen/go/trajectory/v1;trajectoryv1";
+
+// Kind classifies a step. Unknown span kinds normalise to KIND_OTHER rather
+// than being dropped (F-2.5).
+enum Kind {
+  KIND_UNSPECIFIED = 0;
+  KIND_LLM = 1;
+  KIND_TOOL = 2;
+  KIND_RETRIEVAL = 3;
+  KIND_HUMAN = 4;
+  KIND_OTHER = 5;
+}
+
+// Step is one action inside an episode.
+//
+// Exactly one of content_ref and content_inline carries the payload: content
+// above the sink's blob threshold is externalised to a content-addressed blob
+// and referenced by hash (F-9.3), otherwise it is stored inline.
+message Step {
+  string episode_id = 1;
+  // Canonical linear order.
+  int32 step_idx = 2;
+  // Tree structure; unset for a root step. Retries and abandoned branches
+  // survive as a tree alongside the linear ordering (F-3.4).
+  optional int32 parent_idx = 3;
+  // Retry counter, 0-based.
+  int32 attempt = 4;
+  Kind kind = 5;
+  // system | user | assistant | tool
+  optional string role = 6;
+  // sha256 of the blob holding this payload, when externalised.
+  optional string content_ref = 7;
+  // The payload itself, when below the blob threshold.
+  optional string content_inline = 8;
+  // Set when the payload exceeded the hard maximum and was cut (F-9.7). The
+  // record is kept rather than failed.
+  bool truncated = 9;
+  optional string tool_name = 10;
+  optional string tool_version = 11;
+  // Stable hash of normalised arguments.
+  optional string args_hash = 12;
+  optional string model = 13;
+  optional string provider = 14;
+  optional Params params = 15;
+  optional TokenCounts token_counts = 16;
+  repeated TokenSpan token_spans = 17;
+  Trainable trainable = 18;
+  optional string logprobs_ref = 19;
+  optional string finish_reason = 20;
+  int64 started_at = 21;
+  optional int32 latency_ms = 22;
+  optional Error error = 23;
+  map<string, string> raw = 24;
+}

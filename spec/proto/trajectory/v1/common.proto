@@ -1,0 +1,68 @@
+// Copyright The Trajectory Authors.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package trajectory.v1;
+
+option go_package = "github.com/trajectory-project/trajectory/gen/go/trajectory/v1;trajectoryv1";
+
+// Error is a terminal error attached to an episode or a step.
+message Error {
+  string type = 1;
+  string message = 2;
+}
+
+// EntityKey is a business key extracted from tool arguments or results
+// (F-6). Values are tokenized: extraction runs after redaction (F-6.4), so a
+// key is joinable without being readable. The collector does not resolve,
+// validate or join these.
+message EntityKey {
+  string name = 1;
+  string value = 2;
+}
+
+// Fidelity summarises which replay-critical fields were unavailable from the
+// producer (F-4.6). It exists so a consumer can filter to "episodes good
+// enough to train on" without re-deriving that per field.
+message Fidelity {
+  bool has_params = 1;
+  bool has_token_spans = 2;
+  bool has_tool_versions = 3;
+}
+
+// Params are the generation parameters needed to re-execute an LLM step
+// (F-4.2). Absent fields mean the source did not report them, not that a
+// default applied.
+message Params {
+  optional double temperature = 1;
+  optional double top_p = 2;
+  optional int32 max_tokens = 3;
+  optional int64 seed = 4;
+  repeated string stop = 5;
+}
+
+// TokenCounts are reported by the source when available (F-4.3).
+message TokenCounts {
+  optional int64 input = 1;
+  optional int64 output = 2;
+  optional int64 cached = 3;
+  optional int64 reasoning = 4;
+}
+
+// TokenSpan marks a range of the payload as model-generated versus
+// tool/context output (F-4.4).
+message TokenSpan {
+  int64 start = 1;
+  int64 end = 2;
+  Trainable trainable = 3;
+}
+
+// Trainable is three-valued on purpose: a source that cannot say must not be
+// coerced into a boolean (F-4.4).
+enum Trainable {
+  TRAINABLE_UNSPECIFIED = 0;
+  TRAINABLE_UNKNOWN = 1;
+  TRAINABLE_TRUE = 2;
+  TRAINABLE_FALSE = 3;
+}

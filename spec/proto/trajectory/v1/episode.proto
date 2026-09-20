@@ -1,0 +1,58 @@
+// Copyright The Trajectory Authors.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package trajectory.v1;
+
+import "trajectory/v1/common.proto";
+
+option go_package = "github.com/trajectory-project/trajectory/gen/go/trajectory/v1;trajectoryv1";
+
+// Status is the terminal state of an assembled episode (F-3.3, F-3.5, F-3.7).
+enum Status {
+  STATUS_UNSPECIFIED = 0;
+  // Emitted on an explicit terminal event.
+  STATUS_COMPLETE = 1;
+  // Emitted because the assembly window expired.
+  STATUS_TIMED_OUT = 2;
+  // Emitted early because the assembly buffer hit max_in_flight (F-3.7).
+  STATUS_EVICTED = 3;
+  // An append-only patch for spans that arrived after emit. The original
+  // episode is never mutated (F-3.5).
+  STATUS_PATCHED = 4;
+}
+
+// Episode is one complete agent trajectory and the unit of record.
+//
+// Timestamps are microseconds since the Unix epoch. Both producer clocks
+// (started_at, ended_at) and the collector clock (received_at) are recorded so
+// skew is observable rather than corrected (§20).
+message Episode {
+  string episode_id = 1;
+  string tenant = 2;
+  // N rollouts of one task instance. Producer-supplied only; the collector
+  // never infers it.
+  optional string group_id = 3;
+  // Partition key. Free-form, producer-supplied.
+  optional string task_type = 4;
+  // The configured source name that produced this record (F-1.6).
+  string source = 5;
+  // Instrumentation identity, so fidelity gaps stay attributable (F-2.3).
+  optional string instrumentation = 6;
+  optional string instrumentation_version = 7;
+  repeated EntityKey entity_keys = 8;
+  Status status = 9;
+  optional Fidelity fidelity = 10;
+  // The sampling rule that kept this episode (F-7.4).
+  optional string sampled_by = 11;
+  int64 started_at = 12;
+  optional int64 ended_at = 13;
+  int64 received_at = 14;
+  int32 step_count = 15;
+  optional Error error = 16;
+  string schema_version = 17;
+  // Unrecognised episode-level attributes, preserved verbatim.
+  // Normalisation is never lossy (F-2.2).
+  map<string, string> raw = 18;
+}

@@ -1,0 +1,29 @@
+// Copyright The Trajectory Authors.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package trajectory.v1;
+
+option go_package = "github.com/trajectory-project/trajectory/gen/go/trajectory/v1;trajectoryv1";
+
+enum Encoding {
+  ENCODING_UNSPECIFIED = 0;
+  ENCODING_UTF8 = 1;
+  ENCODING_BASE64 = 2;
+  ENCODING_ZSTD = 3;
+}
+
+// Blob is a payload externalised above the sink's inline threshold, addressed
+// by the sha256 of its content.
+//
+// Deduplication is the point: a system prompt repeated across millions of
+// episodes is stored once (§7.3).
+message Blob {
+  // Primary key, and also the object key under blobs/sha256/<aa>/<bb>/.
+  string sha256 = 1;
+  int64 bytes = 2;
+  string content_type = 3;
+  Encoding encoding = 4;
+  int64 first_seen_at = 5;
+}

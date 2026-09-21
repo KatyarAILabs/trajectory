@@ -4,15 +4,15 @@
 // Package scorer defines how an external system attaches rewards to episodes
 // (F-13.2).
 //
-// The collector ships no implementation, and that is a decision rather than an
-// omission: computing rewards and running verifiers are declared non-goals
-// (N-3) — the collector has no opinion about correctness. The interface is here
+// The collector itself still has no opinion about correctness: it never scores
+// anything while capturing. Spec v0.2 reopened N-3 only offline — `cc score`
+// runs a scorer over a lake after the outcome join — and pkg/scorer/rules is a
+// declarative reference implementation. The interface is here
 // so that a verifier written later reads the same records a trainer does and
 // writes into the reserved `rewards` table (§7.4) in a known shape, instead of
 // every consumer inventing its own.
 //
-// A Scorer runs outside the collector, against the lake. Nothing in the
-// collector calls one.
+// A Scorer runs outside the collector's capture path, against the lake.
 package scorer
 
 import (
@@ -29,6 +29,14 @@ type Episode struct {
 	// Payloads maps step_idx to the resolved payload, whether it was inline
 	// or externalised, so a scorer never has to know about content_ref.
 	Payloads map[int32]string
+
+	// Latest is the most recent value of each outcome kind attributed to
+	// this episode by the outcome join, as of the join's as_of.
+	Latest map[string]string
+	// LabelStatus is final, provisional or unjoinable (pkg/join).
+	LabelStatus string
+	// OutcomeCount is how many outcomes were attributed.
+	OutcomeCount int
 }
 
 // Scorer assigns a reward to an episode.

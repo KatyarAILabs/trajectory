@@ -54,6 +54,8 @@ type ManifestFile struct {
 type ManifestCounts struct {
 	Episodes     int64 `json:"episodes"`
 	Steps        int64 `json:"steps"`
+	Outcomes     int64 `json:"outcomes,omitempty"`
+	Rewards      int64 `json:"rewards,omitempty"`
 	BlobsNew     int64 `json:"blobs_new"`
 	BlobsDeduped int64 `json:"blobs_deduped"`
 }
@@ -191,6 +193,10 @@ func (s *Sink) putParquet(ctx context.Context, key string, rows any) (int64, err
 	case []record.Step:
 		body, err = marshalParquet(r, s.compression())
 	case []record.Blob:
+		body, err = marshalParquet(r, s.compression())
+	case []record.Outcome:
+		body, err = marshalParquet(r, s.compression())
+	case []record.Reward:
 		body, err = marshalParquet(r, s.compression())
 	default:
 		return 0, fmt.Errorf("lake: unsupported row type %T", rows)

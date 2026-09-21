@@ -1,0 +1,32 @@
+# A rules scorer for `cc score`: rewards from business outcomes.
+#
+# Rules are tried in order; the first whose `when` is true decides the reward,
+# and its clause name is recorded on the reward so every number in the lake
+# traces back to the rule that produced it. `latest` holds the most recent
+# value of each outcome kind attributed to the episode by the outcome join.
+#
+# Change a rule's meaning → bump `version`. Rewards are keyed by verifier and
+# version, so old and new scores never overwrite each other.
+
+verifier_id: refund.resolved
+version: "1"
+
+# Only score episodes whose observation horizon has closed. Scoring earlier
+# rewards whatever has not been complained about yet.
+require_final: true
+
+rules:
+  # Order is the policy: a reopened ticket is a failure even if the refund went
+  # through.
+  - clause: reopened
+    when: "latest['ticket_status'] == 'reopened'"
+    reward: 0.0
+  - clause: refund_completed
+    when: "latest['refund_status'] == 'completed'"
+    reward: 1.0
+  - clause: solved_without_refund
+    when: "latest['ticket_status'] == 'solved'"
+    reward: 0.7
+
+# Unset means "does not apply" — different from a reward of zero.
+# default_reward: 0.0

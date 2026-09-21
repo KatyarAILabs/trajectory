@@ -1,0 +1,28 @@
+{
+  "batch_id": "01M31RA1HSGDK8N0SWWFVZAXFM",
+  "schema_version": "0.2.0",
+  "written_at": "2026-09-21T10:31:10Z",
+  "collector": {
+    "version": "dev",
+    "instance": "apples-MacBook-Pro.local"
+  },
+  "time_range": {
+    "min": "2026-10-31T00:00:00Z",
+    "max": "2026-10-31T00:00:00Z"
+  },
+  "files": [
+    {
+      "path": "rewards/dt=2026-09-21/part-01M31RA1HSGDK8N0SWWFVZAXFM.parquet",
+      "rows": 1,
+      "bytes": 2126,
+      "table": "rewards"
+    }
+  ],
+  "counts": {
+    "episodes": 0,
+    "steps": 0,
+    "rewards": 1,
+    "blobs_new": 0,
+    "blobs_deduped": 0
+  }
+}

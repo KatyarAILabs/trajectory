@@ -101,6 +101,8 @@ type Dataset struct {
 	Episodes  []record.Episode
 	Steps     []record.Step
 	Blobs     []record.Blob
+	Outcomes  []record.Outcome
+	Rewards   []record.Reward
 	Manifests []manifest
 	// SchemaVersions are the versions found in file metadata.
 	SchemaVersions map[string]int
@@ -195,6 +197,20 @@ func (d *Dataset) loadParquet(path, rel string) error {
 			return nil
 		}
 		d.Steps = append(d.Steps, rows...)
+	case strings.Contains(rel, "/"+record.TableOutcomes+"/"):
+		rows, err := parquet.ReadFile[record.Outcome](path)
+		if err != nil {
+			d.Unreadable = append(d.Unreadable, fmt.Sprintf("%s: %v", rel, err))
+			return nil
+		}
+		d.Outcomes = append(d.Outcomes, rows...)
+	case strings.Contains(rel, "/"+record.TableRewards+"/"):
+		rows, err := parquet.ReadFile[record.Reward](path)
+		if err != nil {
+			d.Unreadable = append(d.Unreadable, fmt.Sprintf("%s: %v", rel, err))
+			return nil
+		}
+		d.Rewards = append(d.Rewards, rows...)
 	case strings.Contains(rel, "/"+record.TableBlobs+"/"):
 		rows, err := parquet.ReadFile[record.Blob](path)
 		if err != nil {

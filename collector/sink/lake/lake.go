@@ -68,6 +68,11 @@ type Sink struct {
 
 	mu      sync.Mutex
 	pending map[string]*partition
+	// outcomes wait for the next flush like episode rows do, so a
+	// low-volume outcome feed does not write one tiny file per post.
+	outcomes      []record.Outcome
+	outcomesSince time.Time
+	rewards       []record.Reward
 	// blobsSeen is this process's view of which blobs exist, so a repeated
 	// payload is hashed and written once. It is a cache; the store's own
 	// Exists is authoritative, which keeps the sink correct across restarts
@@ -171,6 +176,26 @@ func (s *Sink) Write(ctx context.Context, eps []*pipeline.Assembled) error {
 	return nil
 }
 
+// WriteOutcomes buffers outcomes for the next flush.
+func (s *Sink) WriteOutcomes(_ context.Context, rows []record.Outcome) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.outcomes) == 0 {
+		s.outcomesSince = s.opts.Now()
+	}
+	s.outcomes = append(s.outcomes, rows...)
+	return nil
+}
+
+// WriteRewards buffers rewards for the next flush. Rewards are written by
+// `cc score`, offline, never by the capture path.
+func (s *Sink) WriteRewards(_ context.Context, rows []record.Reward) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rewards = append(s.rewards, rows...)
+	return nil
+}
+
 // Flush writes every partition that is due, and all of them when force is set.
 func (s *Sink) Flush(ctx context.Context) error { return s.flush(ctx, true) }
 
@@ -190,9 +215,20 @@ func (s *Sink) flush(ctx context.Context, force bool) error {
 			delete(s.pending, key)
 		}
 	}
+
+	var outcomes []record.Outcome
+	if len(s.outcomes) > 0 && (force || len(s.outcomes) >= 50000 || now.Sub(s.outcomesSince) >= s.opts.RollInterval) {
+		outcomes = s.outcomes
+		s.outcomes = nil
+	}
+	var rewards []record.Reward
+	if force && len(s.rewards) > 0 {
+		rewards = s.rewards
+		s.rewards = nil
+	}
 	s.mu.Unlock()
 
-	if len(due) == 0 {
+	if len(due) == 0 && len(outcomes) == 0 && len(rewards) == 0 {
 		return nil
 	}
 	sort.Slice(due, func(i, j int) bool { return due[i].key < due[j].key })
@@ -236,6 +272,49 @@ func (s *Sink) flush(ctx context.Context, force bool) error {
 				Path: stKey, Rows: int64(len(p.steps)), Bytes: n, Table: record.TableSteps,
 			})
 			counts.Steps += int64(len(p.steps))
+		}
+	}
+
+	if len(outcomes) > 0 {
+		key := path.Join(record.TableOutcomes, "dt="+now.UTC().Format("2006-01-02"),
+			"part-"+batchID+".parquet")
+		n, err := s.putParquet(ctx, key, outcomes)
+		if err != nil {
+			s.mu.Lock()
+			s.outcomes = append(outcomes, s.outcomes...)
+			s.mu.Unlock()
+			return err
+		}
+		files = append(files, ManifestFile{
+			Path: key, Rows: int64(len(outcomes)), Bytes: n, Table: record.TableOutcomes,
+		})
+		counts.Outcomes += int64(len(outcomes))
+		for _, o := range outcomes {
+			if minT == 0 || o.OccurredAt < minT {
+				minT = o.OccurredAt
+			}
+			if o.OccurredAt > maxT {
+				maxT = o.OccurredAt
+			}
+		}
+	}
+
+	if len(rewards) > 0 {
+		key := path.Join(record.TableRewards, "dt="+now.UTC().Format("2006-01-02"),
+			"part-"+batchID+".parquet")
+		n, err := s.putParquet(ctx, key, rewards)
+		if err != nil {
+			s.mu.Lock()
+			s.rewards = append(rewards, s.rewards...)
+			s.mu.Unlock()
+			return err
+		}
+		files = append(files, ManifestFile{
+			Path: key, Rows: int64(len(rewards)), Bytes: n, Table: record.TableRewards,
+		})
+		counts.Rewards += int64(len(rewards))
+		if minT == 0 {
+			minT, maxT = rewards[0].At, rewards[0].At
 		}
 	}
 
@@ -294,7 +373,7 @@ func (s *Sink) PendingRows() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	n := 0
+	n := len(s.outcomes)
 	for _, p := range s.pending {
 		n += len(p.episodes)
 	}

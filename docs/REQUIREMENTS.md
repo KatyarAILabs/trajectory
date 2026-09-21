@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Document** | CC Collector requirements |
-| **Version** | 0.1 — draft for review |
+| **Version** | 0.2 — draft for review (see change log) |
 | **Status** | Open questions unresolved (§21). Not approved for implementation. |
 | **Scope** | Continuous Collection only. Capture and land. |
 | **Licence intent** | Apache 2.0, permissive dependencies only |
@@ -58,9 +58,9 @@ The result is telemetry that can explain an incident but cannot be scored by a v
 | ID | Non-goal | Rationale |
 |---|---|---|
 | N-1 | Change data capture from systems of record | Separate problem, separate release. An HTTP endpoint (§9.4) is the v1 substitute. |
-| N-2 | Joining trajectories to outcomes | Requires watermarks and as-of semantics. Deferred. |
-| N-3 | Computing rewards or running verifiers | The collector has no opinion about correctness. |
-| N-4 | Training-set export | CT concern. Readers consume Parquet directly. |
+| ~~N-2~~ | ~~Joining trajectories to outcomes~~ | **Reopened in v0.2.** Implemented offline with as-of and watermark semantics (`pkg/join`, `cc join`). |
+| ~~N-3~~ | ~~Computing rewards or running verifiers~~ | **Reopened in v0.2, offline only.** `cc score` runs a `Scorer` over a joined lake; the capture path still never scores. |
+| ~~N-4~~ | ~~Training-set export~~ | **Reopened in v0.2.** `cc export` writes trajectory, chat and preference datasets. |
 | N-5 | A UI, search, or alerting | DuckDB, Trino and existing tools cover this. |
 | N-6 | Being a general-purpose observability agent | It collects one shape of data well. |
 
@@ -715,3 +715,4 @@ docs/
 | Version | Date | Change |
 |---|---|---|
 | 0.1-draft | 2026-09-11 | First draft. Scope fixed to capture-and-land; CDC, joins, rewards and CT export declared non-goals with reserved schema surface. |
+| 0.2-draft | 2026-09-21 | **N-2, N-3 and N-4 reopened; N-1 kept.** The outcome join, offline scoring and training export are in scope, as tools that run over a lake after capture — the capture path still has no opinion about correctness. `POST /v1/outcomes` (§9.4) is implemented; there are still no CDC connectors (Q-6). Schema 0.2.0: `outcomes` gains `entity_name` and `outcome_id`, `steps` gains `cost_usd` (F-4.3); `outcomes` and `rewards` are written, `labels` stays reserved. Rationale: the differentiation analysis concluded capture alone is a commodity and outcome-labelled trajectories are the defensible product; the reserved surface existed so this could be additive, and it was. |

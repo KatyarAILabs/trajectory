@@ -1,17 +1,18 @@
 // Copyright The Trajectory Authors.
 // SPDX-License-Identifier: Apache-2.0
 //
-// RESERVED SURFACE (§2.3, §7.4).
+// OUTCOMES, LABELS AND REWARDS (§2.3, §7.4).
 //
-// These messages are defined and their tables are created empty. The collector
-// NEVER writes to them in v1. Joining trajectories to outcomes (N-2) and
-// computing rewards (N-3) are declared non-goals.
+// These were reserved surface in the v0.1 draft: defined, created empty, never
+// written. Spec v0.2 reopens N-2 and N-3 (see the change log): outcomes are now
+// written by POST /v1/outcomes and `cc outcomes`, and rewards by `cc score`.
+// `labels` remains reserved.
 //
-// They exist here because defining them costs nothing now, and it means the
-// join and the CT export arrive later as additive schema changes rather than a
-// major version bump that breaks every reader.
+// N-1 still holds: there are no CDC connectors. Outcomes arrive only because a
+// customer's own job posts them (§9.4, Q-6).
 //
-// Do not add a writer for these without reopening §2.2.
+// Every change here is additive, which is exactly what reserving them in v0.1
+// was for: readers built against v0.1 read these tables unmodified.
 
 syntax = "proto3";
 
@@ -24,12 +25,23 @@ option go_package = "github.com/trajectory-project/trajectory/gen/go/trajectory/
 // occurred_at and observed_at are distinct because a future join needs as-of
 // semantics and watermarks; recording only one of them forecloses that.
 message Outcome {
+  // The entity key value, transformed by the same redaction rules as an
+  // episode's entity keys, so a tokenized key on one side matches the other.
   string entity_key = 1;
   string kind = 2;
   string value = 3;
+  // When it happened in the business system.
   int64 occurred_at = 4;
+  // When the collector learned of it. The as-of join filters on this, so a
+  // dataset built "as of" a date never sees an outcome reported later.
   int64 observed_at = 5;
   string source = 6;
+  // Which key this is (ticket_id, order_id). Appended in v0.2: without it a
+  // ticket and an order that share an id string would join to each other.
+  optional string entity_name = 7;
+  // Producer-supplied identity. Re-posting the same outcome_id is a
+  // duplicate, and the join counts it once.
+  optional string outcome_id = 8;
 }
 
 // Label is a human or machine annotation on a step.

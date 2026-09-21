@@ -517,3 +517,30 @@ func TestPresidioProtocol(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+// The outcome join depends on this: a key tokenized on the episode side must
+// tokenize identically on the outcome side, or the join matches nothing.
+func TestTransformKeyMatchesEpisodeSide(t *testing.T) {
+	r, _ := New(policy(), testKey, nil)
+
+	// Episode side: the key is inside a payload and redacted as a field.
+	ep := episode(`{"args":{"requester":"alice@example.com"}}`)
+	if err := r.Process(context.Background(), ep); err != nil {
+		t.Fatal(err)
+	}
+	episodeToken := extractToken(t, *ep.Steps[0].ContentInline)
+
+	// Outcome side: the raw value as a ticketing system would export it.
+	outcomeKey, err := r.TransformKey("alice@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcomeKey != strings.Trim(episodeToken, `"}`) {
+		t.Errorf("outcome key %q does not match episode token %q; the join would miss", outcomeKey, episodeToken)
+	}
+
+	// A key no rule touches passes through unchanged.
+	if got, _ := r.TransformKey("TKT-77"); got != "TKT-77" {
+		t.Errorf("an untouched key changed: %q", got)
+	}
+}

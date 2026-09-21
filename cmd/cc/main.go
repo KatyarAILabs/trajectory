@@ -44,6 +44,14 @@ func main() {
 		os.Exit(cmdReplay(os.Args[2:]))
 	case "conform":
 		os.Exit(cmdConform(os.Args[2:]))
+	case "outcomes":
+		os.Exit(cmdOutcomes(os.Args[2:]))
+	case "join":
+		os.Exit(cmdJoin(os.Args[2:]))
+	case "score":
+		os.Exit(cmdScore(os.Args[2:]))
+	case "export":
+		os.Exit(cmdExport(os.Args[2:]))
 	case "version":
 		fmt.Printf("cc %s (commit %s, schema %s)\n",
 			version.Collector, version.Commit, version.Schema)
@@ -68,6 +76,14 @@ Usage:
   cc inspect  <file>                         Summarise a Parquet file, blob or manifest
   cc replay   -lake <dir> <episode-id>       Print a reconstructed episode
   cc conform  <lake-dir>                     Check a dataset against the format spec
+
+Outcome join:
+  cc outcomes -config <file> -from <csv|json>   Load business outcomes
+  cc join     -lake <dir> [-as-of T] [-horizon D] -out <file>
+                                             Label episodes with their outcomes
+  cc score    -lake <dir> -scorer <file>     Turn outcomes into rewards
+  cc export   -lake <dir> -format <f> -out <file>
+                                             Write a training dataset
   cc version                                 Print version and schema version
 
 %s`, formatHelp())

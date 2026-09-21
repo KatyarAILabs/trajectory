@@ -64,10 +64,19 @@ docker: ## F-12.5: distroless, non-root, read-only rootfs
 sample: ## Regenerate the published sample dataset (F-10.5)
 	@rm -rf spec/testdata/sample-dataset
 	@go build -o $(BIN)/cc ./cmd/cc
+	@# The README lives outside the generated directory so regenerating the
+	@# data cannot delete it; it is copied in at the end.
+	@rm -rf /tmp/cc-sample-buffer
 	@CC_HMAC_KEY=sample-dataset-key-published-with-the-spec \
 	  $(BIN)/cc import -config spec/testdata/sample.yaml \
 	    -from spec/testdata/langfuse-export.json langfuse
+	@# Outcomes and rewards at a fixed as-of, so the sample is reproducible.
+	@CC_HMAC_KEY=sample-dataset-key-published-with-the-spec \
+	  $(BIN)/cc outcomes -config spec/testdata/sample.yaml -from spec/testdata/sample-outcomes.csv
+	@$(BIN)/cc score -lake spec/testdata/sample-dataset -as-of 2026-10-31T00:00:00Z \
+	  -horizon 30d -scorer examples/scorer.yaml
 	@$(BIN)/cc conform spec/testdata/sample-dataset
+	@cp spec/testdata/SAMPLE-DATASET.md spec/testdata/sample-dataset/README.md
 
 .PHONY: conform
 conform: ## Run the conformance suite against the sample dataset
@@ -94,6 +103,10 @@ help:
 .PHONY: demo
 demo: ## UC-5: run the collector locally, send a trajectory, reconstruct it
 	./scripts/demo.sh
+
+.PHONY: demo-outcomes
+demo-outcomes: ## The outcome join end to end: capture, outcomes, join, score, export
+	./scripts/demo-outcomes.sh
 
 .PHONY: acceptance
 acceptance: ## Run the DoD-1 end-to-end acceptance test

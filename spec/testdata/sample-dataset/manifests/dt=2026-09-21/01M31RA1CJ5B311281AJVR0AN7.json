@@ -1,7 +1,7 @@
 {
-  "batch_id": "01M31KEG5Q6DMS5TAB44VE1BG3",
-  "schema_version": "0.1.0",
-  "written_at": "2026-09-21T09:06:13Z",
+  "batch_id": "01M31RA1CJ5B311281AJVR0AN7",
+  "schema_version": "0.2.0",
+  "written_at": "2026-09-21T10:31:09Z",
   "collector": {
     "version": "dev",
     "instance": "apples-MacBook-Pro.local"
@@ -12,13 +12,13 @@
   },
   "files": [
     {
-      "path": "episodes/dt=2026-09-20/tenant=example/task_type=unknown/part-01M31KEG5Q6DMS5TAB44VE1BG3.parquet",
+      "path": "episodes/dt=2026-09-20/tenant=example/task_type=unknown/part-01M31RA1CJ5B311281AJVR0AN7.parquet",
       "rows": 2,
       "bytes": 6135,
       "table": "episodes"
     },
     {
-      "path": "steps/dt=2026-09-20/tenant=example/task_type=unknown/part-01M31KEG5Q6DMS5TAB44VE1BG3.parquet",
+      "path": "steps/dt=2026-09-20/tenant=example/task_type=unknown/part-01M31RA1CJ5B311281AJVR0AN7.parquet",
       "rows": 4,
       "bytes": 9293,
       "table": "steps"

@@ -36,6 +36,9 @@ type Options struct {
 	AuthToken string
 	// TLSConfig, when set, wraps the listener.
 	TLSConfig *tls.Config
+	// Outcomes handles POST /v1/outcomes (§9.4). Nil keeps the endpoint
+	// refusing, which is correct for an embedding host with no sink.
+	Outcomes func(ctx context.Context, source string, in []wire.Outcome) (int, error)
 }
 
 // Receiver serves the native HTTP API.
@@ -81,14 +84,9 @@ func (r *Receiver) Start(ctx context.Context, next pipeline.Next) error {
 	mux.HandleFunc("/v1/episodes", r.auth(r.handleEpisodes(next)))
 	mux.HandleFunc("/v1/spans", r.auth(r.handleSpans(next)))
 
-	// §9.4: reserved. It exists so a design partner can prove a join by
-	// hand without the collector growing a CDC subsystem, but v1 writes no
-	// outcomes (N-1, N-2), so it must not silently accept and discard.
-	mux.HandleFunc("/v1/outcomes", r.auth(func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "the outcomes endpoint is reserved and not implemented in v1; "+
-			"the outcomes table is created empty and never written (spec §2.3, §9.4)",
-			http.StatusNotImplemented)
-	}))
+	// §9.4: business outcomes for the outcome join, posted by the
+	// customer's own job. The collector never pulls them (N-1).
+	mux.HandleFunc("/v1/outcomes", r.auth(r.handleOutcomes()))
 
 	r.srv = &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 
@@ -268,6 +266,48 @@ func (r *Receiver) handleSpans(next pipeline.Next) http.HandlerFunc {
 		r.accepted.Add(1)
 		writeJSON(w, http.StatusAccepted, response{Steps: len(envs)})
 	}
+}
+
+func (r *Receiver) handleOutcomes() http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
+		if req.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if r.opts.Outcomes == nil {
+			writeJSONError(w, http.StatusNotImplemented, "outcomes are not accepted by this collector")
+			return
+		}
+		body, ok := r.readBody(w, req)
+		if !ok {
+			return
+		}
+		in, err := wire.DecodeOutcomes(body)
+		if err != nil {
+			r.rejected.Add(1)
+			writeJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		n, err := r.opts.Outcomes(req.Context(), r.opts.Name, in)
+		if err != nil {
+			if pipeline.IsQuotaExceeded(err) || isRetryable(err) {
+				r.refuse(w, err)
+				return
+			}
+			r.rejected.Add(1)
+			writeJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		r.accepted.Add(1)
+		writeJSON(w, http.StatusAccepted, map[string]int{"accepted": n})
+	}
+}
+
+// isRetryable distinguishes "try again" (backpressure) from "this will never
+// work" (a malformed outcome), which map to 503 and 400.
+func isRetryable(err error) bool {
+	return strings.Contains(err.Error(), "backpressure")
 }
 
 // readBody reads a bounded request body (F-1.7).

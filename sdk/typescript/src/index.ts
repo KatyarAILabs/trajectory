@@ -128,6 +128,25 @@ export class Client {
     }
   }
 
+  /**
+   * Report a business outcome for the outcome join (§9.4). Send the raw
+   * identifier; the collector transforms it the same way it transformed
+   * episode keys, so a tokenized key still joins. Pass a stable `outcomeId`
+   * so a retry is counted once.
+   */
+  outcome(o: {
+    entityName: string; entityKey: string; kind: string; value: string;
+    occurredAt: string | number; outcomeId?: string; source?: string;
+  }): Promise<boolean> {
+    const body: Record<string, unknown> = {
+      entity_name: o.entityName, entity_key: o.entityKey, kind: o.kind,
+      value: o.value, occurred_at: o.occurredAt,
+    };
+    if (o.outcomeId) body.outcome_id = o.outcomeId;
+    if (o.source) body.source = o.source;
+    return this.post("/v1/outcomes", body);
+  }
+
   /** @internal */
   async post(path: string, body: unknown): Promise<boolean> {
     const headers: Record<string, string> = { "Content-Type": "application/json" };

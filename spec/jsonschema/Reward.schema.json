@@ -1,5 +1,5 @@
 {
-  "$id": "https://trajectory.dev/schema/v0.1.0/Reward.schema.json",
+  "$id": "https://trajectory.dev/schema/v0.2.0/Reward.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {

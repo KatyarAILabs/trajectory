@@ -238,6 +238,7 @@ func New(cfg *config.Config, log *slog.Logger) (*Service, error) {
 				MaxRequestBytes: sc.MaxRequestBytes,
 				AuthToken:       token,
 				TLSConfig:       httpTLS,
+				Outcomes:        s.IngestOutcomes,
 			}))
 		default:
 			s.sources = append(s.sources, otlp.New(otlp.Options{
@@ -605,20 +606,31 @@ func (s *Service) onEpisode(ep *pipeline.Assembled) {
 // deliver is the delivery loop's send function: decode one buffered record and
 // hand it to the sink.
 func (s *Service) deliver(ctx context.Context, payload []byte) error {
-	var ep pipeline.Assembled
-	if err := json.Unmarshal(payload, &ep); err != nil {
+	var rec bufferedRecord
+	if err := json.Unmarshal(payload, &rec); err != nil {
 		// A record that cannot be decoded will never succeed, so it is
 		// marked permanent: it dead-letters immediately rather than
 		// consuming the retry budget and delaying everything behind it.
 		return buffer.Permanent(fmt.Errorf("undecodable buffered record: %w", err))
 	}
 
-	// The sink buffers; the deliverer's Commit makes the batch durable.
-	// Flushing here instead would mean one object per record, which is both
-	// far slower and produces files nothing can compact.
 	start := time.Now()
-	if err := s.sink.Write(ctx, []*pipeline.Assembled{&ep}); err != nil {
-		return err
+	switch {
+	case len(rec.Outcomes) > 0:
+		if err := s.sink.WriteOutcomes(ctx, rec.Outcomes); err != nil {
+			return err
+		}
+	case rec.Episode != nil:
+		// The sink buffers; the deliverer's Commit makes the batch
+		// durable. Flushing here instead would mean one object per
+		// record, which is both far slower and produces files nothing
+		// can compact.
+		ep := pipeline.Assembled{Episode: *rec.Episode, Steps: rec.Steps}
+		if err := s.sink.Write(ctx, []*pipeline.Assembled{&ep}); err != nil {
+			return err
+		}
+	default:
+		return buffer.Permanent(fmt.Errorf("buffered record holds neither an episode nor outcomes"))
 	}
 	s.metrics.SinkWriteDuration.WithLabelValues(s.sink.Name()).Observe(time.Since(start).Seconds())
 	return nil
@@ -701,6 +713,9 @@ func (s *Service) policy() *policy { return s.pol.Load() }
 
 // errBackpressure tells a source to ask its producer to retry (F-8.2).
 var errBackpressure = errors.New("collector is under backpressure")
+
+// errQuota is a quota refusal; sources map it to 429.
+var errQuota = pipeline.ErrQuotaExceeded
 
 // Shutdown stops sources and flushes.
 func (s *Service) Shutdown(ctx context.Context) error {

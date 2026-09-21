@@ -1,0 +1,13 @@
+message Reward {
+	required binary episode_id (STRING);
+	required binary verifier_id (STRING);
+	required binary verifier_version (STRING);
+	required double reward;
+	optional group clauses (MAP) {
+		repeated group key_value {
+			required binary key (STRING);
+			required double value;
+		}
+	}
+	required int64 at (TIMESTAMP(isAdjustedToUTC=true,unit=MICROS));
+}

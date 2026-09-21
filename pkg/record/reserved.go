@@ -26,6 +26,10 @@ type Outcome struct {
 	OccurredAt int64  `parquet:"occurred_at,timestamp(microsecond)"`
 	ObservedAt int64  `parquet:"observed_at,timestamp(microsecond)"`
 	Source     string `parquet:"source"`
+	// EntityName distinguishes ticket_id from order_id. Appended in v0.2.
+	EntityName *string `parquet:"entity_name,optional"`
+	// OutcomeID makes re-posting idempotent. Appended in v0.2.
+	OutcomeID *string `parquet:"outcome_id,optional"`
 }
 
 // Label is a human or machine annotation on a step.

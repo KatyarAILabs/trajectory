@@ -27,7 +27,8 @@ durable, queryable storage — with no opinion about what reads it afterwards.
 | **Storage** | Parquet plus content-addressed deduplicated blobs, on local FS or any S3-compatible store, partitioned, manifest written last |
 | **Security** | TLS and mTLS, per-source tokens, customer-managed encryption keys, distroless non-root image, a CI lint that forbids payloads in logs |
 | **Deployment** | Helm chart with NetworkPolicy and per-replica buffer volumes; OTel Collector exporter; signed releases with SBOM |
-| **CLI** | `run`, `validate [-sample]`, `import`, `redact --test`, `inspect`, `replay`, `conform` |
+| **Outcome join** | Business outcomes via `POST /v1/outcomes` or file; as-of join with watermarks and last-touch attribution; rules-based rewards; training export as trajectories, chat or preference pairs — see [docs/OUTCOMES.md](docs/OUTCOMES.md) |
+| **CLI** | `run`, `validate [-sample]`, `import`, `redact --test`, `inspect`, `replay`, `conform`, `outcomes`, `join`, `score`, `export` |
 
 Measured, not claimed — reproduce with `make loadtest`:
 
@@ -51,7 +52,8 @@ Measured, not claimed — reproduce with `make loadtest`:
 ## Try it
 
 ```sh
-make demo
+make demo            # capture a trajectory and reconstruct it with DuckDB
+make demo-outcomes   # then label it with business outcomes, score it, export training data
 ```
 
 That runs the collector against a local filesystem sink, sends it a recorded
@@ -78,16 +80,16 @@ replayed.
 Deliberately, and contractually ([spec §2.2](docs/REQUIREMENTS.md)):
 
 - **not** change data capture from systems of record
-- **not** a joiner of trajectories to business outcomes
-- **not** a computer of rewards, and it ships no verifier
-- **not** a training-set exporter — readers consume Parquet directly
+- **not** a CDC system — outcomes are posted to it, never pulled
+- **not** a scorer on the capture path — rewards are computed offline, over a
+  lake, by `cc score`
 - **not** a UI, a search engine, or an alerting system
 - **not** a general-purpose observability agent
 
-The schema *defines* `outcomes`, `labels` and `rewards` and creates those
-tables empty. It never writes them in v1. That costs nothing now and means the
-join arrives later as an additive change rather than a major version bump that
-breaks every reader.
+The v0.1 spec reserved `outcomes`, `labels` and `rewards` so the outcome join
+could arrive later as an additive change. In v0.2 it did: `outcomes` and
+`rewards` are written, `labels` stays reserved, and nothing a v0.1 reader
+understood changed.
 
 ## Layout
 

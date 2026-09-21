@@ -214,9 +214,9 @@ func TestNativeAPIRequiresToken(t *testing.T) {
 	}
 }
 
-// §9.4: the outcomes endpoint is reserved. It must refuse rather than accept
-// and discard, which would let a partner believe a join was being recorded.
-func TestOutcomesEndpointIsReservedNotSilent(t *testing.T) {
+// §9.4: a malformed outcome is refused with the field that is missing, rather
+// than stored as a row that could never join to anything.
+func TestOutcomesEndpointValidates(t *testing.T) {
 	lake := filepath.Join(t.TempDir(), "lake")
 	t.Setenv("CC_HMAC_KEY", "acceptance-test-key")
 
@@ -236,14 +236,17 @@ func TestOutcomesEndpointIsReservedNotSilent(t *testing.T) {
 	defer func() { cancel(); <-done }()
 
 	resp, err := http.Post("http://127.0.0.1:44323/v1/outcomes", "application/json",
-		bytes.NewReader([]byte(`{"entity_key":"x"}`)))
+		bytes.NewReader([]byte(`{"entity_key":"x","kind":"k","occurred_at":"2026-09-21T00:00:00Z"}`)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
 
-	if resp.StatusCode != http.StatusNotImplemented {
-		t.Errorf("status %d, want 501 — accepting and discarding would be worse than refusing",
-			resp.StatusCode)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status %d, want 400", resp.StatusCode)
+	}
+	if !bytes.Contains(body, []byte("entity_name")) {
+		t.Errorf("error does not name the missing field: %s", body)
 	}
 }

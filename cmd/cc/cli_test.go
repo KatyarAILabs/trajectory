@@ -282,3 +282,74 @@ func TestImport(t *testing.T) {
 		t.Error("an unknown format exited 0")
 	}
 }
+
+// The outcome-join commands, as built binaries: outcomes → join → score →
+// export, with exit codes and outputs an operator would script against.
+func TestOutcomeJoinCommands(t *testing.T) {
+	dir := t.TempDir()
+	cfg := writeConfig(t, dir, "")
+	lake := filepath.Join(dir, "lake")
+
+	// Capture one episode touching TKT-5 through the import path.
+	ep := filepath.Join(dir, "ep.jsonl")
+	os.WriteFile(ep, []byte(`{"episode_id":"oj-1","started_at":1758362400000000,"steps":[`+
+		`{"kind":"llm","content":"{\"input\":\"refund TKT-5\",\"output\":\"done\"}"},`+
+		`{"kind":"tool","tool_name":"zendesk.update_ticket","content":"{\"args\":{\"id\":\"TKT-5\"}}"}]}`+"\n"), 0o600)
+	if r := cc(t, keyEnv, "import", "-config", cfg, "-from", ep, "jsonl"); r.code != 0 {
+		t.Fatalf("import: %s", r.stderr)
+	}
+
+	csv := filepath.Join(dir, "outcomes.csv")
+	os.WriteFile(csv, []byte("outcome_id,entity_name,entity_key,kind,value,occurred_at\n"+
+		"e1,ticket_id,TKT-5,refund_status,completed,2025-09-21T00:00:00Z\n"), 0o600)
+	r := cc(t, keyEnv, "outcomes", "-config", cfg, "-from", csv)
+	if r.code != 0 || !strings.Contains(r.stdout, "loaded 1 outcomes") {
+		t.Fatalf("outcomes: exit %d\n%s%s", r.code, r.stdout, r.stderr)
+	}
+
+	// A bad CSV names what is missing and exits non-zero.
+	bad := filepath.Join(dir, "bad.csv")
+	os.WriteFile(bad, []byte("entity_key,kind\nTKT-5,x\n"), 0o600)
+	if r := cc(t, keyEnv, "outcomes", "-config", cfg, "-from", bad); r.code == 0 || !strings.Contains(r.stderr, "entity_name") {
+		t.Errorf("a CSV without entity_name was accepted: %s", r.stderr)
+	}
+
+	// As of after the load: the outcome's observed_at is when it was loaded,
+	// and an as-of before that correctly cannot see it.
+	asOf := []string{"-lake", lake, "-as-of", time.Now().Add(24 * time.Hour).UTC().Format(time.RFC3339), "-horizon", "30d"}
+
+	labels := filepath.Join(dir, "labels.jsonl")
+	r = cc(t, nil, append([]string{"join"}, append(asOf, "-out", labels)...)...)
+	if r.code != 0 || !strings.Contains(r.stdout, "1 attributed") {
+		t.Fatalf("join: exit %d\n%s", r.code, r.stdout)
+	}
+	b, _ := os.ReadFile(labels)
+	if !strings.Contains(string(b), `"refund_status":"completed"`) {
+		t.Errorf("labels file lacks the outcome: %s", b)
+	}
+
+	scorer := filepath.Join(dir, "scorer.yaml")
+	os.WriteFile(scorer, []byte("verifier_id: v\nversion: '1'\nrules:\n"+
+		"  - {clause: done, when: \"latest['refund_status'] == 'completed'\", reward: 1}\n"), 0o600)
+	r = cc(t, nil, append([]string{"score", "-scorer", scorer}, asOf...)...)
+	if r.code != 0 || !strings.Contains(r.stdout, "wrote 1 rewards") {
+		t.Fatalf("score: exit %d\n%s%s", r.code, r.stdout, r.stderr)
+	}
+	// Idempotent per verifier version.
+	if r := cc(t, nil, append([]string{"score", "-scorer", scorer}, asOf...)...); !strings.Contains(r.stdout, "already scored    1") {
+		t.Errorf("re-scoring was not idempotent:\n%s", r.stdout)
+	}
+
+	out := filepath.Join(dir, "chat.jsonl")
+	r = cc(t, nil, append([]string{"export", "-format", "chat", "-min-reward", "1", "-out", out}, asOf...)...)
+	if r.code != 0 {
+		t.Fatalf("export: exit %d\n%s", r.code, r.stderr)
+	}
+	if b, _ := os.ReadFile(out); !strings.Contains(string(b), `"messages"`) {
+		t.Errorf("chat export is empty or malformed: %s", b)
+	}
+
+	if r := cc(t, nil, "conform", lake); r.code != 0 {
+		t.Errorf("lake with outcomes and rewards fails conformance:\n%s", r.stdout)
+	}
+}

@@ -1,9 +1,12 @@
 {
-  "$id": "https://trajectory.dev/schema/v0.1.0/Outcome.schema.json",
+  "$id": "https://trajectory.dev/schema/v0.2.0/Outcome.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
     "entity_key": {
+      "type": "string"
+    },
+    "entity_name": {
       "type": "string"
     },
     "kind": {
@@ -20,6 +23,9 @@
         "string",
         "integer"
       ]
+    },
+    "outcome_id": {
+      "type": "string"
     },
     "source": {
       "type": "string"

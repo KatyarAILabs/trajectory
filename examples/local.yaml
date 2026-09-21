@@ -7,7 +7,7 @@
 # Every key here is validated by `cc validate`. An unknown key is an error, not
 # a warning, so a typo cannot silently disable a policy.
 
-schema_version: "0.1.0"
+schema_version: "0.2.0"
 tenant: dev
 
 sources:

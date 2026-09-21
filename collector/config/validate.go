@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/trajectory-project/trajectory/internal/version"
@@ -25,11 +26,14 @@ func (c *Config) Validate(path string) error {
 
 	if c.SchemaVersion == "" {
 		bad("schema_version", "required")
-	} else if c.SchemaVersion != version.Schema {
-		// A mismatch means the operator expects a different record shape
-		// than this binary writes. Refusing is safer than writing files
-		// they will not be able to read as they expect.
-		bad("schema_version", "is %q but this build writes %q",
+	} else if !compatibleSchema(c.SchemaVersion, version.Schema) {
+		// A config names the record shape its operator expects. Within a
+		// major version this build writes a superset of every earlier
+		// minor (F-10.1), so an older minor is fine. A different major,
+		// or a newer minor than this build knows, means the operator
+		// expects a shape this binary cannot write.
+		bad("schema_version", "is %q but this build writes %q; a config may name "+
+			"this version or an earlier minor of the same major",
 			c.SchemaVersion, version.Schema)
 	}
 	if c.Tenant == "" {
@@ -427,4 +431,22 @@ func (c *Config) validateSinks(bad func(string, string, ...any)) {
 			}
 		}
 	}
+}
+
+// compatibleSchema reports whether a build writing `have` satisfies a config
+// that expects `want`: same major, and want's minor no newer than have's.
+func compatibleSchema(want, have string) bool {
+	wm, wn, ok1 := majorMinor(want)
+	hm, hn, ok2 := majorMinor(have)
+	return ok1 && ok2 && wm == hm && wn <= hn
+}
+
+func majorMinor(v string) (int, int, bool) {
+	parts := strings.SplitN(strings.TrimPrefix(v, "v"), ".", 3)
+	if len(parts) < 2 {
+		return 0, 0, false
+	}
+	maj, err1 := strconv.Atoi(parts[0])
+	min, err2 := strconv.Atoi(parts[1])
+	return maj, min, err1 == nil && err2 == nil
 }

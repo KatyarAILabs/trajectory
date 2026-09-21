@@ -83,7 +83,7 @@ serviceMonitor:
 # `cc validate` in an init container, so a bad config fails the rollout rather
 # than crash-looping.
 config:
-  schema_version: "0.1.0"
+  schema_version: "0.2.0"
   tenant: CHANGEME
 
   # Graceful-shutdown deadline (F-11.5). Must be shorter than the pod's

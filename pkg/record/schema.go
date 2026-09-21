@@ -32,9 +32,12 @@ func Tables() map[string]any {
 	}
 }
 
-// Written names the tables the collector writes in v1. Everything in Tables()
-// but not here is reserved surface (§2.3).
-func Written() []string { return []string{TableEpisodes, TableSteps, TableBlobs} }
+// Written names the tables the collector writes. Everything in Tables() but not
+// here is reserved surface (§2.3). Spec v0.2 moved outcomes and rewards out of
+// reserve; labels stays reserved.
+func Written() []string {
+	return []string{TableEpisodes, TableSteps, TableBlobs, TableOutcomes, TableRewards}
+}
 
 // SchemaOf returns the Parquet schema for a table, panicking on an unknown
 // name. The physical layout it produces is pinned by the golden test.

@@ -543,3 +543,34 @@ func (r *Redactor) Stats() Stats {
 	}
 	return out
 }
+
+// TransformKey applies the policy's rules to an entity key value exactly as
+// they apply to a payload, and nothing else: no allow-list, no detector.
+//
+// It exists for the outcome join. An episode's entity key is extracted after
+// redaction (F-6.4), so if a rule tokenized it, the lake holds a token. An
+// outcome arrives from a business system holding the raw value. Putting the
+// outcome's key through the same rules, with the same HMAC key, produces the
+// same token — which is the only way the two sides meet. Skipping this makes
+// the join silently match nothing whenever a key happens to be tokenized.
+//
+// The allow-list does not apply because a key is an identifier the operator
+// already chose to extract, not free text; the detector does not apply because
+// it would redact identifiers it does not recognise as such inconsistently.
+func (r *Redactor) TransformKey(value string) (string, error) {
+	out := value
+	for _, rule := range r.rules {
+		if rule.Re == nil || rule.Path != nil {
+			continue
+		}
+		if !rule.Re.MatchString(out) {
+			continue
+		}
+		next, err := r.applyAction(rule, out)
+		if err != nil {
+			return "", err
+		}
+		out = next
+	}
+	return out, nil
+}

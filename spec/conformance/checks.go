@@ -34,6 +34,8 @@ func Check(d *Dataset) Report {
 		checkParentIndicesValid,
 		checkTimestampsSane,
 		checkManifestsCoverFiles,
+		checkOutcomesJoinable,
+		checkRewardsIdentified,
 		checkReservedTablesEmpty,
 	} {
 		r.Results = append(r.Results, fn(d))
@@ -420,23 +422,66 @@ func checkManifestsCoverFiles(d *Dataset) Result {
 	return pass(check, ref)
 }
 
-// §2.3: outcomes, labels and rewards are reserved. Writing them in v1 means
-// something has reopened a declared non-goal.
+// labels is still reserved (§2.3). outcomes and rewards were reopened in v0.2.
 func checkReservedTablesEmpty(d *Dataset) Result {
-	const check, ref = "reserved tables are empty", "§2.3, §7.4"
+	const check, ref = "labels table is empty", "§2.3, §7.4"
 
-	for _, table := range []string{record.TableOutcomes, record.TableLabels, record.TableRewards} {
-		dir := filepath.Join(d.Root, table)
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			continue // absent is correct
+	entries, err := os.ReadDir(filepath.Join(d.Root, record.TableLabels))
+	if err != nil {
+		return pass(check, ref) // absent is correct
+	}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".parquet") {
+			return fail(check, ref, "labels contains data; it is reserved surface and not yet written by any tool")
 		}
-		for _, e := range entries {
-			if strings.HasSuffix(e.Name(), ".parquet") {
-				return fail(check, ref,
-					"%s contains data; it is reserved surface and must not be written in v1",
-					table)
-			}
+	}
+	return pass(check, ref)
+}
+
+// An outcome must carry what the join needs, or it is a row that can never
+// match anything.
+func checkOutcomesJoinable(d *Dataset) Result {
+	const check, ref = "outcomes carry join fields", "§9.4"
+
+	if len(d.Outcomes) == 0 {
+		return skip(check, ref, "no outcomes")
+	}
+	const floor = int64(1_000_000_000_000_000)
+	for i, o := range d.Outcomes {
+		switch {
+		case o.EntityName == nil || *o.EntityName == "":
+			return fail(check, ref, "outcome %d has no entity_name; it cannot be told apart from another key type", i)
+		case o.EntityKey == "":
+			return fail(check, ref, "outcome %d has no entity_key", i)
+		case o.Kind == "":
+			return fail(check, ref, "outcome %d has no kind", i)
+		case o.OccurredAt < floor:
+			return fail(check, ref, "outcome %d occurred_at %d is not plausibly microseconds", i, o.OccurredAt)
+		case o.ObservedAt < floor:
+			return fail(check, ref, "outcome %d observed_at %d is not plausibly microseconds; as-of joins depend on it", i, o.ObservedAt)
+		}
+	}
+	return pass(check, ref)
+}
+
+// A reward must say which verifier and version produced it, and must refer to
+// an episode that exists.
+func checkRewardsIdentified(d *Dataset) Result {
+	const check, ref = "rewards identify verifier and episode", "F-13.2"
+
+	if len(d.Rewards) == 0 {
+		return skip(check, ref, "no rewards")
+	}
+	known := map[string]bool{}
+	for _, e := range d.Episodes {
+		known[e.EpisodeID] = true
+	}
+	for i, r := range d.Rewards {
+		switch {
+		case r.VerifierID == "" || r.VerifierVersion == "":
+			return fail(check, ref, "reward %d lacks verifier_id or verifier_version", i)
+		case !known[r.EpisodeID]:
+			return fail(check, ref, "reward %d refers to episode %s, which is not in this lake", i, r.EpisodeID)
 		}
 	}
 	return pass(check, ref)

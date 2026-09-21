@@ -82,3 +82,11 @@ test("bearer token is sent", async () => {
   await c.episode({}, async (ep) => { await ep.llm("p", "c"); });
   assert.equal(bodies[0].auth, "Bearer secret");
 });
+
+test("outcome posts to /v1/outcomes", async () => {
+  const c = new Client({ endpoint: url, throwErrors: true });
+  await c.outcome({ entityName: "ticket_id", entityKey: "TKT-1", kind: "refund_status",
+    value: "completed", occurredAt: "2026-09-21T10:00:00Z", outcomeId: "evt-1" });
+  assert.equal(bodies[0].path, "/v1/outcomes");
+  assert.equal(bodies[0].body.outcome_id, "evt-1");
+});

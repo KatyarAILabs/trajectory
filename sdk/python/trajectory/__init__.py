@@ -119,6 +119,37 @@ class Client:
         else:
             ep.end()
 
+    def outcome(
+        self,
+        entity_name: str,
+        entity_key: str,
+        kind: str,
+        value: str,
+        occurred_at: Any,
+        *,
+        outcome_id: Optional[str] = None,
+        source: Optional[str] = None,
+    ) -> bool:
+        """Report a business outcome for the outcome join (§9.4).
+
+        Send the raw identifier — the collector applies the same redaction
+        rules to it as to episode keys, so a key stored as a token still joins.
+        ``occurred_at`` may be an RFC 3339 string or epoch seconds. Pass a
+        stable ``outcome_id`` so a retry is counted once.
+        """
+        body: Dict[str, Any] = {
+            "entity_name": entity_name,
+            "entity_key": entity_key,
+            "kind": kind,
+            "value": value,
+            "occurred_at": occurred_at,
+        }
+        if outcome_id:
+            body["outcome_id"] = outcome_id
+        if source:
+            body["source"] = source
+        return self._post("/v1/outcomes", body)
+
     def _post(self, path: str, body: Any) -> bool:
         data = json.dumps(body).encode("utf-8")
         headers = {"Content-Type": "application/json"}

@@ -117,6 +117,15 @@ class ClientTest(unittest.TestCase):
             ep.llm("p", "c")
         self.assertEqual(len(Recorder.bodies), 1, "a 400 will not succeed on retry")
 
+    def test_outcome(self):
+        c = trajectory.Client(self.url, raise_errors=True)
+        c.outcome("ticket_id", "TKT-1", "refund_status", "completed",
+                  "2026-09-21T10:00:00Z", outcome_id="evt-1")
+        path, body = Recorder.bodies[-1]
+        self.assertEqual(path, "/v1/outcomes")
+        self.assertEqual(body["entity_name"], "ticket_id")
+        self.assertEqual(body["outcome_id"], "evt-1")
+
     def test_reversed_token_span_rejected(self):
         with self.assertRaises(ValueError):
             trajectory.TokenSpan(9, 2, True)

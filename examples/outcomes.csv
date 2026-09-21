@@ -1,0 +1,3 @@
+outcome_id,entity_name,entity_key,kind,value,occurred_at
+evt-1001,ticket_id,TKT-9001,refund_status,completed,2026-09-20T12:00:00Z
+evt-1002,ticket_id,TKT-9001,ticket_status,solved,2026-09-20T12:05:00Z

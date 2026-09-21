@@ -133,19 +133,20 @@ func TestEnumVocabulary(t *testing.T) {
 	}
 }
 
-// The reserved tables are created empty and never written in v1 (§2.3, §7.4).
-func TestReservedTablesAreNotWritten(t *testing.T) {
+// labels remains reserved (§2.3, §7.4). Spec v0.2 reopened outcomes and
+// rewards deliberately; nothing has reopened labels, and adding a writer for it
+// should require the same explicit decision.
+func TestLabelsStayReserved(t *testing.T) {
 	written := map[string]bool{}
 	for _, name := range Written() {
 		written[name] = true
 	}
-	for _, reserved := range []string{TableOutcomes, TableLabels, TableRewards} {
-		if written[reserved] {
-			t.Errorf("%q is reserved surface but appears in Written(); "+
-				"adding a writer requires reopening spec §2.2", reserved)
-		}
+	if written[TableLabels] {
+		t.Error("labels is reserved surface but appears in Written(); reopen it in the spec first")
 	}
-	if len(written) != 3 {
-		t.Errorf("Written() has %d tables, want 3 (episodes, steps, blobs)", len(written))
+	for _, want := range []string{TableEpisodes, TableSteps, TableBlobs, TableOutcomes, TableRewards} {
+		if !written[want] {
+			t.Errorf("%q is missing from Written()", want)
+		}
 	}
 }

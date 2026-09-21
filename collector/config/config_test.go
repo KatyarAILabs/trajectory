@@ -302,3 +302,20 @@ func TestShutdownTimeout(t *testing.T) {
 		t.Errorf("configured = %v, want 45s", cfg.ShutdownTimeout)
 	}
 }
+
+// Within a major version a build writes a superset of every earlier minor, so a
+// config naming an older minor keeps working after an upgrade.
+func TestSchemaVersionCompatibility(t *testing.T) {
+	cases := map[[2]string]bool{
+		{"0.1.0", "0.2.0"}:  true,
+		{"0.2.0", "0.2.0"}:  true,
+		{"0.3.0", "0.2.0"}:  false, // config expects columns this build lacks
+		{"1.0.0", "0.2.0"}:  false,
+		{"banana", "0.2.0"}: false,
+	}
+	for c, want := range cases {
+		if got := compatibleSchema(c[0], c[1]); got != want {
+			t.Errorf("compatibleSchema(%q, %q) = %v, want %v", c[0], c[1], got, want)
+		}
+	}
+}

@@ -14,7 +14,7 @@ package version
 //
 // This constant is the source of truth. spec/VERSION mirrors it for tooling
 // that cannot import Go, and a test asserts the two agree.
-const Schema = "0.1.0"
+const Schema = "0.2.0"
 
 // Collector is the build version of the binary, overridden at link time.
 var Collector = "dev"

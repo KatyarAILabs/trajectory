@@ -57,6 +57,9 @@ type Metrics struct {
 	// operator-authored config text, not user data, which is what keeps it
 	// inside the §11 no-user-data rule.
 	Sampled *prometheus.CounterVec
+	// OutcomesIngested counts business outcomes accepted for the join.
+	OutcomesIngested *prometheus.CounterVec
+
 	// Shed counts records refused before the buffer, by source and reason
 	// (quota or backpressure). F-7.3 asks for "a metric for what was shed".
 	Shed *prometheus.CounterVec
@@ -155,6 +158,8 @@ func New() *Metrics {
 	m.DeadLettered = counter(reg, "cc_dead_lettered_total",
 		"Records that exhausted their delivery attempts.")
 
+	m.OutcomesIngested = counterVec(reg, "cc_outcomes_ingested_total",
+		"Business outcomes accepted for the outcome join, by source.", "source")
 	m.Shed = counterVec(reg, "cc_shed_total",
 		"Records refused before buffering, by source and reason.", "source", "reason")
 	m.LostOnRestart = counter(reg, "cc_assembly_lost_on_restart_total",

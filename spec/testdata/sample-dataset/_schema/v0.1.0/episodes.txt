@@ -1,0 +1,39 @@
+message Episode {
+	required binary episode_id (STRING);
+	required binary tenant (STRING);
+	optional binary group_id (STRING);
+	optional binary task_type (STRING);
+	required binary source (STRING);
+	optional binary instrumentation (STRING);
+	optional binary instrumentation_version (STRING);
+	required group entity_keys (LIST) {
+		repeated group list {
+			required group element {
+				required binary name (STRING);
+				required binary value (STRING);
+			}
+		}
+	}
+	required binary status (ENUM);
+	optional group fidelity {
+		required boolean has_params;
+		required boolean has_token_spans;
+		required boolean has_tool_versions;
+	}
+	optional binary sampled_by (STRING);
+	required int64 started_at (TIMESTAMP(isAdjustedToUTC=true,unit=MICROS));
+	optional int64 ended_at (TIMESTAMP(isAdjustedToUTC=true,unit=MICROS));
+	required int64 received_at (TIMESTAMP(isAdjustedToUTC=true,unit=MICROS));
+	required int32 step_count (INT(32,true));
+	optional group error {
+		required binary type (STRING);
+		required binary message (STRING);
+	}
+	required binary schema_version (STRING);
+	optional group raw (MAP) {
+		repeated group key_value {
+			required binary key (STRING);
+			required binary value (STRING);
+		}
+	}
+}

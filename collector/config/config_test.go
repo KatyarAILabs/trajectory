@@ -34,6 +34,8 @@ redaction:
       match: {regex: "[\\w.+-]+@[\\w-]+\\.[\\w.]+"}
       action: tokenize
   tokenization: {key_env: TEST_HMAC_KEY}
+buffer:
+  dir: /tmp/buf
 sinks:
   - name: local
     type: fs
@@ -167,7 +169,7 @@ func TestAllErrorsReportedTogether(t *testing.T) {
 	t.Setenv("TEST_HMAC_KEY", "k")
 	body := strings.NewReplacer(
 		"tenant: acme", "",
-		"type: fs", "type: s3",
+		"type: fs", "type: unsupported",
 		"action: tokenize", "action: nonsense",
 	).Replace(valid)
 
@@ -180,5 +182,103 @@ func TestAllErrorsReportedTogether(t *testing.T) {
 		if !strings.Contains(msg, want) {
 			t.Errorf("error omits %q; it should report every problem at once:\n%v", want, msg)
 		}
+	}
+}
+
+// A collector with no buffer loses everything in flight when a sink is
+// unreachable, which is exactly what G-4 forbids. Refusing to start is better
+// than a silent downgrade in durability.
+func TestBufferDirRequired(t *testing.T) {
+	t.Setenv("TEST_HMAC_KEY", "k")
+	body := strings.Replace(valid, "buffer:\n  dir: /tmp/buf\n", "", 1)
+
+	_, err := Load(write(t, body))
+	if err == nil {
+		t.Fatal("a config with no buffer was accepted")
+	}
+	if !strings.Contains(err.Error(), "buffer.dir") {
+		t.Errorf("error does not name buffer.dir: %v", err)
+	}
+}
+
+// §10's example writes `max_bytes: 8Gi`. Accepting only a raw byte count would
+// make the published example invalid.
+func TestByteSizeSuffixes(t *testing.T) {
+	cases := map[string]int64{
+		"8Gi":   8 << 30,
+		"512Mi": 512 << 20,
+		"64KiB": 64 << 10,
+		"1024":  1024,
+		"2GB":   2 * 1000 * 1000 * 1000,
+	}
+	for in, want := range cases {
+		got, err := ParseByteSize(in)
+		if err != nil {
+			t.Errorf("ParseByteSize(%q): %v", in, err)
+			continue
+		}
+		if int64(got) != want {
+			t.Errorf("ParseByteSize(%q) = %d, want %d", in, got, want)
+		}
+	}
+
+	if _, err := ParseByteSize("banana"); err == nil {
+		t.Error("an unparseable size was accepted")
+	}
+	if _, err := ParseByteSize("-5Gi"); err == nil {
+		t.Error("a negative size was accepted")
+	}
+}
+
+func TestByteSizeInConfig(t *testing.T) {
+	t.Setenv("TEST_HMAC_KEY", "k")
+	body := strings.Replace(valid, "buffer:\n  dir: /tmp/buf",
+		"buffer:\n  dir: /tmp/buf\n  max_bytes: 8Gi\n  segment_bytes: 64Mi", 1)
+
+	cfg, err := Load(write(t, body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if int64(cfg.Buffer.MaxBytes) != 8<<30 {
+		t.Errorf("max_bytes = %d, want %d", cfg.Buffer.MaxBytes, int64(8)<<30)
+	}
+	if int64(cfg.Buffer.SegmentBytes) != 64<<20 {
+		t.Errorf("segment_bytes = %d", cfg.Buffer.SegmentBytes)
+	}
+}
+
+// F-12.3: aws:kms without a key id silently falls back to the bucket default
+// key, which defeats the point of customer-managed keys.
+func TestKMSRequiresKeyID(t *testing.T) {
+	t.Setenv("TEST_HMAC_KEY", "k")
+	body := strings.Replace(valid, `sinks:
+  - name: local
+    type: fs
+    dir: /tmp/lake`, `sinks:
+  - name: lake
+    type: s3
+    bucket: acme-lake
+    region: us-east-1
+    sse: {type: "aws:kms"}`, 1)
+
+	_, err := Load(write(t, body))
+	if err == nil {
+		t.Fatal("aws:kms with no key_id was accepted")
+	}
+	if !strings.Contains(err.Error(), "sse.key_id") {
+		t.Errorf("error does not name sse.key_id: %v", err)
+	}
+}
+
+// A segment larger than the whole buffer could never be sealed and reclaimed,
+// so the buffer would grow without bound despite the configured limit.
+func TestSegmentLargerThanBufferRejected(t *testing.T) {
+	t.Setenv("TEST_HMAC_KEY", "k")
+	body := strings.Replace(valid, "buffer:\n  dir: /tmp/buf",
+		"buffer:\n  dir: /tmp/buf\n  max_bytes: 10Mi\n  segment_bytes: 100Mi", 1)
+
+	_, err := Load(write(t, body))
+	if err == nil {
+		t.Fatal("segment_bytes larger than max_bytes was accepted")
 	}
 }

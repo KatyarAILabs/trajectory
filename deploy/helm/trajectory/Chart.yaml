@@ -1,0 +1,14 @@
+apiVersion: v2
+name: trajectory
+description: Capture agent trajectories at replay fidelity and land them in object storage
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/trajectory-project/trajectory
+sources:
+  - https://github.com/trajectory-project/trajectory
+keywords:
+  - observability
+  - llm
+  - agents
+  - opentelemetry

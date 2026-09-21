@@ -1,0 +1,41 @@
+# Helicone request/response log payload.
+# https://docs.helicone.ai
+#
+# Same UC-1 limitation: model calls only.
+
+name: helicone
+version: "1.0"
+
+kind: fixed
+fixed_kind: llm
+
+fields:
+  session_key:
+    - "$.request.properties.Helicone-Session-Id"
+    - "$.request.properties.session_id"
+    - "$.request.id"
+  group_id:
+    - "$.request.properties.group_id"
+  task_type:
+    - "$.request.properties.Helicone-Session-Path"
+
+  input:
+    - "$.request.body.messages"
+  output:
+    - "$.response.body.choices"
+
+  model:
+    - "$.request.model"
+    - "$.response.model"
+  provider:
+    - "$.request.provider"
+
+  temperature:
+    - "$.request.body.temperature"
+  max_tokens:
+    - "$.request.body.max_tokens"
+
+  token_input:
+    - "$.response.body.usage.prompt_tokens"
+  token_output:
+    - "$.response.body.usage.completion_tokens"

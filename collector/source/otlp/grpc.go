@@ -10,6 +10,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
 
 	"go.opentelemetry.io/collector/pdata/ptrace/ptraceotlp"
@@ -47,12 +48,18 @@ func (s *traceService) Export(ctx context.Context, req ptraceotlp.ExportRequest)
 
 // startGRPC serves OTLP/gRPC until ctx is cancelled.
 func (r *Receiver) startGRPC(ctx context.Context, next pipeline.Next) error {
-	srv := grpc.NewServer(
+	serverOpts := []grpc.ServerOption{
 		// Bound the message size for the same reason the HTTP path
 		// bounds the body: an oversized request must be rejected, not
 		// buffered (F-1.7).
 		grpc.MaxRecvMsgSize(int(r.opts.MaxRequestBytes)),
-	)
+	}
+	if r.opts.GRPCTLSConfig != nil {
+		serverOpts = append(serverOpts,
+			grpc.Creds(credentials.NewTLS(r.opts.GRPCTLSConfig)))
+	}
+
+	srv := grpc.NewServer(serverOpts...)
 	ptraceotlp.RegisterGRPCServer(srv, &traceService{r: r, next: next})
 
 	ln, err := net.Listen("tcp", r.opts.GRPCListen)

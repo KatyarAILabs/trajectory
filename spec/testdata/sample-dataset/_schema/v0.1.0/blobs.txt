@@ -1,0 +1,7 @@
+message Blob {
+	required binary sha256 (STRING);
+	required int64 bytes (INT(64,true));
+	required binary content_type (STRING);
+	required binary encoding (ENUM);
+	required int64 first_seen_at (TIMESTAMP(isAdjustedToUTC=true,unit=MICROS));
+}

@@ -21,7 +21,7 @@ import (
 
 	"github.com/trajectory-project/trajectory/collector/config"
 	"github.com/trajectory-project/trajectory/collector/service"
-	"github.com/trajectory-project/trajectory/collector/sink/fsstore"
+	"github.com/trajectory-project/trajectory/collector/sink/lake"
 	"github.com/trajectory-project/trajectory/pkg/record"
 )
 
@@ -330,7 +330,7 @@ func readTable[T any](t *testing.T, root, table string) []T {
 	return out
 }
 
-func readManifest(t *testing.T, root string) fsstore.Manifest {
+func readManifest(t *testing.T, root string) lake.Manifest {
 	t.Helper()
 
 	var found string
@@ -348,7 +348,7 @@ func readManifest(t *testing.T, root string) fsstore.Manifest {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var m fsstore.Manifest
+	var m lake.Manifest
 	if err := json.Unmarshal(b, &m); err != nil {
 		t.Fatalf("manifest is not valid JSON: %v", err)
 	}
@@ -368,7 +368,7 @@ func waitForListener(t *testing.T, addr string) {
 	t.Fatalf("source never started listening on %s", addr)
 }
 
-func testConfig(lake string) *config.Config {
+func testConfig(lakeDir string) *config.Config {
 	cfg := &config.Config{
 		SchemaVersion: "0.1.0",
 		Tenant:        "acme",
@@ -396,8 +396,15 @@ func testConfig(lake string) *config.Config {
 		{Tool: "zendesk.update_ticket", Keys: map[string]string{"ticket_id": "$.args.id"}},
 	}
 
+	cfg.Buffer.Dir = filepath.Join(filepath.Dir(lakeDir), "buffer")
+	cfg.Buffer.MaxBytes = 64 << 20
+	cfg.Buffer.SegmentBytes = 1 << 20
+	cfg.Buffer.MaxAttempts = 3
+	cfg.Buffer.RetryBaseDelay = time.Millisecond
+	cfg.Buffer.RetryMaxDelay = 5 * time.Millisecond
+
 	cfg.Sinks = []config.Sink{{
-		Name: "local", Type: "fs", Dir: lake,
+		Name: "local", Type: "fs", Dir: lakeDir,
 		PartitionBy:        []string{"dt", "tenant", "task_type"},
 		BlobThresholdBytes: 8192,
 		MaxPayloadBytes:    8 << 20,

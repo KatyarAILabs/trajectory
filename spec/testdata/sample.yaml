@@ -1,0 +1,24 @@
+schema_version: "0.1.0"
+tenant: example
+sources:
+  - name: otlp
+    type: otlp
+    http: {listen: "127.0.0.1:46318"}
+assembly: {window: 5m, settle_after_terminal: 100ms}
+redaction:
+  default: deny
+  allow: ["steps[*].content_inline", "steps[*].raw"]
+  rules:
+    - id: email
+      match: {regex: "[\\w.+-]+@[\\w-]+\\.[\\w.]+"}
+      action: tokenize
+  tokenization: {key_env: CC_HMAC_KEY}
+entities:
+  - tool: zendesk.update_ticket
+    keys: {ticket_id: "$.args.id"}
+buffer: {dir: /tmp/cc-sample-buffer, max_bytes: 64Mi, segment_bytes: 4Mi}
+sinks:
+  - name: sample
+    type: fs
+    dir: spec/testdata/sample-dataset
+telemetry: {log_level: error}

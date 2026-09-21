@@ -307,3 +307,101 @@ reader writing against the tables alone would not expect it.
 | External PII detection (F-5.8) | Regex plus allow-list covers the structured cases; the hook is an interface away | A partner with free-text PII that no regex catches |
 | Logprobs (F-4.5) | MAY, and no convention carries them | A partner doing token-level analysis |
 | `cc inspect` cannot read a partially written file | The manifest is written last, so an unmanifested file is not yet real to a reader | Debugging a crashed write, where a partial file is exactly what you want to look at |
+
+---
+
+## Appendix C — Phase 3 and 4 build notes
+
+### C.1 The buffer had a silent data-loss bug that only load testing found
+
+During a load run the log filled with `buffer evicted data reason=corrupt_record
+bytes=57112480` — tens of megabytes of already-redacted trajectories discarded
+with a warning.
+
+The cause was not a bug in the framing. It was **two collectors on one buffer
+directory**: a `rm -rf` had failed silently and a second process was started
+over a live buffer. Two writers appending to one segment interleave partial
+records, and the reader then fails to verify the framing and skips whole
+segments.
+
+Nothing prevented this, and nothing would have prevented it in production
+either — a rolling restart, or a pod rescheduled onto a volume its predecessor
+had not released, produces exactly this. Fixed with an advisory `flock` on the
+buffer directory, so the second process refuses to start instead of corrupting
+the log. The Helm chart is a StatefulSet with per-replica volumes for the same
+reason.
+
+Recovery also now scans every segment for damage rather than only the last.
+Skipping to the next segment on a bad record discarded everything after it;
+finding the tear precisely loses only what was actually damaged.
+
+### C.2 Dead-lettering on a sink outage was the wrong default
+
+The first deliverer dead-lettered any record that exhausted its retries. A
+chaos test showed what that means: a bucket unreachable for longer than
+`max_attempts × backoff` empties the entire buffer into a dead-letter directory
+that someone then has to replay by hand.
+
+The fix is to distinguish transient from permanent. A sink that is down retries
+indefinitely, bounded by the buffer's own byte and age limits, which is where
+"down too long" is already handled and made observable. A record the sink will
+never accept — undecodable bytes — dead-letters immediately, so it cannot block
+everything behind it.
+
+**The two failure directions are deliberately opposite**, and worth stating
+because a later contributor will otherwise "fix" one of them:
+
+| Stage | On failure | Why |
+|---|---|---|
+| Redaction | Quarantine | Passing an unredacted record on is a breach |
+| Sampling | Keep | Dropping on a bug is silent data loss |
+| Delivery, transient | Retain and retry | The sink will come back |
+| Delivery, permanent | Dead-letter | One bad record must not block the queue |
+
+### C.3 Two throughput bugs, and why the first measurement was a lie
+
+The first load test reported 6,503 spans/s. That number was meaningless:
+delivery was starved, so it measured ingest against a queue that was silently
+growing. Once delivery kept pace, real throughput was **4,742 spans/s** — below
+the §13 target.
+
+A CPU profile showed the collector was only 22% busy, with 39% of that in raw
+syscalls. The cause was `readAt` opening and closing the segment file **for
+every record read** — four syscalls each, over a thousand per batch. Caching a
+read handle per segment took it to **6,836 spans/s**, a 44% improvement.
+
+Two smaller fixes came out of the same investigation. Delivery committed once
+per record, which is both slow and produces files nothing can compact; it now
+batches. And `cc_buffer_bytes` reported on-disk size rather than the
+undelivered backlog, so it stayed flat while delivery made progress — an
+operator watching it during an incident would have concluded delivery was
+stuck.
+
+**The lesson worth keeping:** a throughput number measured while a downstream
+stage is starved is not a throughput number. The harness now runs delivery
+under load for exactly this reason.
+
+### C.4 What the §13 numbers actually mean
+
+| Property | Target | Measured | Caveat |
+|---|---|---|---|
+| Throughput | 5k spans/s at 2 vCPU / 2 GB | 6,836 spans/s | On a developer laptop with the load generator co-resident, not the reference hardware |
+| Idle RSS | < 100 MiB | 26 MiB | |
+| Under load | Bounded | 66 MiB, goroutines flat | 25s, not the 24h soak §15 asks for |
+| Startup | < 5s | Sub-second | |
+
+The soak is the honest gap. A 25-second run shows memory is not obviously
+unbounded; it does not show what §15 asks for, which is 24 hours at twice rated
+load. That needs CI hardware and belongs before M3.
+
+### C.5 Deferred, with the reason
+
+| Deferred | Why it is safe for now | When it bites |
+|---|---|---|
+| Gateway webhook receiver (F-1.3) | The mapping files are written and the declarative format is proven by the convention tables; only the HTTP handler is missing | A team whose only integration point is LiteLLM |
+| File tail (F-1.4), Kafka (F-1.5) | SHOULD and MAY | A producer that writes JSONL and cannot be changed |
+| Iceberg registration (F-9.8) | Q-3 deferred it to v1.1; the manifest already carries what a catalog needs | A customer whose query engine only sees Iceberg tables |
+| Per-source redaction override (F-5.7) | Single-tenant per deployment (Q-5) | One collector fronting two teams with different policies |
+| External PII detection (F-5.8) | Regex plus allow-list covers structured cases | Free-text PII no regex catches |
+| 24h soak (§15) | A 25s run shows memory is not obviously unbounded | Before claiming M3 |
+| Durable assembly state (F-3.8, Q-8) | Best-effort was the agreed v1 answer; in-flight episodes are bounded and their loss is counted | A deployment where a restart during a burst loses meaningful work |

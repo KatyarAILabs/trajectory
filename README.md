@@ -4,10 +4,10 @@ Capture agent trajectories at a fidelity sufficient for offline replay and
 scoring, redact what must never leave the perimeter, and land it in cheap,
 durable, queryable storage — with no opinion about what reads it afterwards.
 
-> **Status: pre-alpha.** Every MUST in the capture path is implemented and
-> tested, but there is still **no disk buffer, no S3 sink and no retry**:
-> nothing survives a sink outage or a process kill mid-batch. That is Phase 3.
-> See [the build plan](docs/PLAN.md).
+> **Status: alpha.** Every MUST in the spec is implemented, tested, and
+> measured rather than asserted. It has not yet run unattended in someone
+> else's cluster for a week, which is the bar §16 sets for M3 — until it has,
+> treat the durability claims as tested rather than proven.
 
 ## What works today
 
@@ -18,10 +18,23 @@ durable, queryable storage — with no opinion about what reads it afterwards.
 | **Redaction** | Deny-by-default allow-lists, explicit deny, regex and JSONPath rules, deterministic HMAC tokenization, metadata-only mode, fail-closed quarantine |
 | **Assembly** | Windowed, bounded, order-independent; retries stay branches; late spans become append-only patches |
 | **Sampling** | Head by session, tail by CEL; never splits an episode |
-| **Storage** | Parquet plus content-addressed deduplicated blobs, partitioned, manifest written last |
-| **CLI** | `run`, `validate`, `import`, `redact --test`, `inspect`, `replay` |
+| **Durability** | Disk buffer surviving sink outages and unclean restarts; exponential backoff with jitter; dead-lettering; backpressure |
+| **Storage** | Parquet plus content-addressed deduplicated blobs, on local FS or any S3-compatible store, partitioned, manifest written last |
+| **Security** | TLS and mTLS, per-source tokens, customer-managed encryption keys, distroless non-root image, a CI lint that forbids payloads in logs |
+| **Deployment** | Helm chart with NetworkPolicy and per-replica buffer volumes; OTel Collector exporter; signed releases with SBOM |
+| **CLI** | `run`, `validate`, `import`, `redact --test`, `inspect`, `replay`, `conform` |
 
-Not yet: disk buffer, S3, retry/DLQ, TLS, Helm, OTel Collector components.
+Measured, not claimed — reproduce with `make loadtest`:
+
+| §13 target | Measured |
+|---|---|
+| 5,000 spans/s | **6,836 spans/s** (with delivery keeping pace) |
+| < 100 MiB idle RSS | **26 MiB** idle, 66 MiB under sustained load |
+| Bounded memory | goroutines flat at 15 across a 25s soak |
+
+Still open: gateway webhook ingest (the mapping files exist, the receiver does
+not), file tailing, Kafka, Iceberg registration, per-source redaction
+overrides.
 
 ## Try it
 
@@ -130,3 +143,36 @@ Two guards are load-bearing and will fail your PR:
 ## Licence
 
 Apache 2.0. Contributions are under [DCO](CONTRIBUTING.md) sign-off, not a CLA.
+
+## Operating it
+
+Two metrics belong on a dashboard from the first day:
+
+**`cc_buffer_bytes`** — the undelivered backlog. Rising steadily means the sink
+is not keeping up; flat and high means it is unreachable. It reports the
+backlog, not disk usage, so it falls as delivery progresses even before
+segments are reclaimed.
+
+**`cc_episodes_without_entity_keys_ratio`** — the share of episodes carrying no
+business key. Those episodes can never be joined to an outcome. Finding this
+out months later, when someone finally tries the join, is the failure the
+metric exists to prevent.
+
+### Things that will bite you
+
+**One buffer directory, one collector.** Two processes sharing it interleave
+partial records and corrupt the log. The collector refuses to start rather than
+allow it, which is why the Helm chart is a StatefulSet with per-replica
+volumes.
+
+**Rotating the HMAC key breaks joinability** of new records against old ones. A
+`key_id` is recorded so a rotation is detectable rather than silent, but the
+break is real. Treat the key as long-lived.
+
+**`buffer.max_bytes` is how long an outage you can absorb.** Roughly your
+bytes/sec times your tolerable outage. Past it, the oldest data is dropped and
+counted — never silently.
+
+**Head and tail sampling compose multiplicatively.** `head: 0.1` with
+`otherwise_rate: 0.1` keeps 1%, not 10%. `cc validate` refuses that combination
+rather than letting you find out from the bill.

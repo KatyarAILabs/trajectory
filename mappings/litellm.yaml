@@ -1,0 +1,63 @@
+# LiteLLM proxy success/failure callback payload.
+# https://docs.litellm.ai/docs/proxy/logging
+#
+# UC-1: organisation-wide coverage with no application change. The limitation
+# is stated in the spec and worth repeating here, because it decides whether
+# this path is enough for a given team: a gateway sees LLM calls only. Tool
+# calls made by the application never reach it, so episodes captured this way
+# have the model turns and none of the actions between them.
+#
+# For scoring "did the agent do the right thing", that is usually not enough.
+# For measuring cost, latency and model behaviour across an organisation, it
+# is.
+
+name: litellm
+version: "1.0"
+
+# Gateway payloads are JSON bodies rather than span attributes, so paths are
+# JSONPath into the callback body.
+kind: fixed
+fixed_kind: llm
+
+fields:
+  session_key:
+    - "$.litellm_params.metadata.session_id"
+    - "$.litellm_params.metadata.trace_id"
+    - "$.litellm_call_id"
+  group_id:
+    - "$.litellm_params.metadata.group_id"
+  task_type:
+    - "$.litellm_params.metadata.task_type"
+
+  input:
+    - "$.messages"
+  output:
+    - "$.response.choices"
+
+  model:
+    - "$.model"
+    - "$.response.model"
+  provider:
+    - "$.litellm_params.custom_llm_provider"
+
+  temperature:
+    - "$.optional_params.temperature"
+  top_p:
+    - "$.optional_params.top_p"
+  max_tokens:
+    - "$.optional_params.max_tokens"
+  seed:
+    - "$.optional_params.seed"
+
+  token_input:
+    - "$.response.usage.prompt_tokens"
+  token_output:
+    - "$.response.usage.completion_tokens"
+
+  finish_reason:
+    - "$.response.choices[0].finish_reason"
+
+  started_at:
+    - "$.start_time"
+  ended_at:
+    - "$.end_time"

@@ -1,0 +1,9 @@
+.git
+.github
+bin
+dist
+var
+docs
+promo-video
+*.md
+!README.md

@@ -1,0 +1,57 @@
+message Step {
+	required binary episode_id (STRING);
+	required int32 step_idx (INT(32,true));
+	optional int32 parent_idx (INT(32,true));
+	required int32 attempt (INT(32,true));
+	required binary kind (ENUM);
+	optional binary role (STRING);
+	optional binary content_ref (STRING);
+	optional binary content_inline (STRING);
+	required boolean truncated;
+	optional binary tool_name (STRING);
+	optional binary tool_version (STRING);
+	optional binary args_hash (STRING);
+	optional binary model (STRING);
+	optional binary provider (STRING);
+	optional group params {
+		optional double temperature;
+		optional double top_p;
+		optional int32 max_tokens (INT(32,true));
+		optional int64 seed (INT(64,true));
+		required group stop (LIST) {
+			repeated group list {
+				required binary element (STRING);
+			}
+		}
+	}
+	optional group token_counts {
+		optional int64 input (INT(64,true));
+		optional int64 output (INT(64,true));
+		optional int64 cached (INT(64,true));
+		optional int64 reasoning (INT(64,true));
+	}
+	required group token_spans (LIST) {
+		repeated group list {
+			required group element {
+				required int64 start (INT(64,true));
+				required int64 end (INT(64,true));
+				required binary trainable (ENUM);
+			}
+		}
+	}
+	required binary trainable (ENUM);
+	optional binary logprobs_ref (STRING);
+	optional binary finish_reason (STRING);
+	required int64 started_at (TIMESTAMP(isAdjustedToUTC=true,unit=MICROS));
+	optional int32 latency_ms (INT(32,true));
+	optional group error {
+		required binary type (STRING);
+		required binary message (STRING);
+	}
+	optional group raw (MAP) {
+		repeated group key_value {
+			required binary key (STRING);
+			required binary value (STRING);
+		}
+	}
+}

@@ -11,6 +11,7 @@ package otlp
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -42,6 +43,10 @@ type Options struct {
 	SessionKeyOrder []string
 	// Conventions maps producer attributes onto the canonical record.
 	Conventions *normalize.Registry
+	// TLSConfig, when set, wraps the HTTP listener (F-12.1).
+	TLSConfig *tls.Config
+	// GRPCTLSConfig, when set, wraps the gRPC listener.
+	GRPCTLSConfig *tls.Config
 }
 
 // Receiver is an OTLP/HTTP trace source.
@@ -128,6 +133,10 @@ func (r *Receiver) startHTTP(ctx context.Context, next pipeline.Next) error {
 	ln, err := net.Listen("tcp", r.opts.Listen)
 	if err != nil {
 		return fmt.Errorf("otlp source %q: http listen %s: %w", r.opts.Name, r.opts.Listen, err)
+	}
+	if r.opts.TLSConfig != nil {
+		r.srv.TLSConfig = r.opts.TLSConfig
+		ln = tls.NewListener(ln, r.opts.TLSConfig)
 	}
 
 	go func() {

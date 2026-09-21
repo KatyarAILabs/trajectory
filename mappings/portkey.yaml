@@ -1,0 +1,49 @@
+# Portkey gateway log payload.
+# https://portkey.ai/docs/product/observability
+#
+# Same UC-1 limitation as LiteLLM: the gateway sees model calls, not the tool
+# calls between them.
+
+name: portkey
+version: "1.0"
+
+kind: fixed
+fixed_kind: llm
+
+fields:
+  session_key:
+    - "$.metadata.session_id"
+    - "$.metadata._user"
+    - "$.trace_id"
+  group_id:
+    - "$.metadata.group_id"
+  task_type:
+    - "$.metadata.task_type"
+
+  input:
+    - "$.request.body.messages"
+  output:
+    - "$.response.body.choices"
+
+  model:
+    - "$.request.body.model"
+    - "$.response.body.model"
+  provider:
+    - "$.provider"
+
+  temperature:
+    - "$.request.body.temperature"
+  top_p:
+    - "$.request.body.top_p"
+  max_tokens:
+    - "$.request.body.max_tokens"
+  seed:
+    - "$.request.body.seed"
+
+  token_input:
+    - "$.response.body.usage.prompt_tokens"
+  token_output:
+    - "$.response.body.usage.completion_tokens"
+
+  finish_reason:
+    - "$.response.body.choices[0].finish_reason"

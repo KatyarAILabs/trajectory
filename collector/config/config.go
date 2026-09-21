@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/trajectory-project/trajectory/collector/tlsconf"
 )
 
 // Config is the whole configuration surface the walking skeleton supports.
@@ -31,6 +33,7 @@ type Config struct {
 	Redaction Redaction `yaml:"redaction"`
 	Entities  []Entity  `yaml:"entities"`
 	Sampling  Sampling  `yaml:"sampling"`
+	Buffer    Buffer    `yaml:"buffer"`
 	Sinks     []Sink    `yaml:"sinks"`
 	Telemetry Telemetry `yaml:"telemetry"`
 }
@@ -40,12 +43,14 @@ type Source struct {
 	// Type is "otlp" or "native".
 	Type string `yaml:"type"`
 	HTTP struct {
-		Listen string `yaml:"listen"`
+		Listen string         `yaml:"listen"`
+		TLS    tlsconf.Config `yaml:"tls"`
 	} `yaml:"http"`
 	// GRPC is the OTLP/gRPC listener. Both transports are independent, so
 	// a deployment may expose either or both.
 	GRPC struct {
-		Listen string `yaml:"listen"`
+		Listen string         `yaml:"listen"`
+		TLS    tlsconf.Config `yaml:"tls"`
 	} `yaml:"grpc"`
 	// Auth is the per-source credential (F-12.1). The token itself comes
 	// from the environment, never inline (F-11.1).
@@ -156,10 +161,64 @@ type Sampling struct {
 	} `yaml:"tail"`
 }
 
+// Buffer is the durable queue between the processors and a sink (F-8). It is
+// what makes acknowledged data survive a sink outage or a process kill.
+type Buffer struct {
+	Dir string `yaml:"dir"`
+	// MaxBytes and MaxAge bound the buffer. The eviction policy is explicit
+	// and observable (F-8.5): the oldest sealed segment is dropped and
+	// counted.
+	MaxBytes ByteSize      `yaml:"max_bytes"`
+	MaxAge   time.Duration `yaml:"max_age"`
+	// SegmentBytes is the size at which a segment is sealed.
+	SegmentBytes ByteSize `yaml:"segment_bytes"`
+	// BackpressureAt is the fraction of max_bytes at which sources are
+	// asked to slow down (F-8.2).
+	BackpressureAt float64 `yaml:"backpressure_at"`
+	// MaxAttempts before a record is dead-lettered (F-8.3).
+	MaxAttempts int `yaml:"max_attempts"`
+	// BatchSize is how many records are handed to the sink before it is
+	// asked to commit. One commit per record made delivery far slower than
+	// ingest, so the backlog grew under normal load.
+	BatchSize int `yaml:"batch_size"`
+	// RetryBaseDelay doubles per attempt, with full jitter.
+	RetryBaseDelay time.Duration `yaml:"retry_base_delay"`
+	RetryMaxDelay  time.Duration `yaml:"retry_max_delay"`
+	// DeadLetterDir receives records that exhausted their attempts. Empty
+	// means the quarantine prefix under the sink.
+	DeadLetterDir string `yaml:"dead_letter_dir"`
+}
+
 type Sink struct {
 	Name string `yaml:"name"`
+	// Type is "fs" or "s3".
 	Type string `yaml:"type"`
 	Dir  string `yaml:"dir"`
+
+	// S3-compatible settings (AWS, GCS, Azure via S3 interop, R2, MinIO).
+	Bucket   string `yaml:"bucket"`
+	Prefix   string `yaml:"prefix"`
+	Region   string `yaml:"region"`
+	Endpoint string `yaml:"endpoint"`
+	// PathStyle is required by MinIO and most self-hosted gateways.
+	PathStyle bool `yaml:"path_style"`
+	// Credentials come from the environment via ${VAR} interpolation,
+	// never inline (F-11.1). Empty means the default credential chain.
+	AccessKeyID     string `yaml:"access_key_id"`
+	SecretAccessKey string `yaml:"secret_access_key"`
+	SessionToken    string `yaml:"session_token"`
+	// SSE configures bucket-side encryption with customer-managed keys
+	// (F-12.3).
+	SSE struct {
+		Type  string `yaml:"type"`
+		KeyID string `yaml:"key_id"`
+	} `yaml:"sse"`
+
+	// TargetFileBytes and RollInterval drive files toward a
+	// compaction-friendly size (F-9.5).
+	TargetFileBytes ByteSize      `yaml:"target_file_bytes"`
+	RollInterval    time.Duration `yaml:"roll_interval"`
+	Compression     string        `yaml:"compression"`
 	// PartitionBy is the directory partitioning under each table prefix
 	// (F-9.2).
 	PartitionBy []string `yaml:"partition_by"`
@@ -175,6 +234,10 @@ type Telemetry struct {
 	Metrics struct {
 		Listen string `yaml:"listen"`
 	} `yaml:"metrics"`
+	// Pprof exposes Go profiling on the telemetry listener. Off by
+	// default: /debug/pprof reveals command-line arguments and memory
+	// contents, so it must never be on by accident.
+	Pprof    bool   `yaml:"pprof"`
 	LogLevel string `yaml:"log_level"`
 }
 
@@ -264,15 +327,53 @@ func (c *Config) applyDefaults() {
 		c.Telemetry.LogLevel = "info"
 	}
 	for i := range c.Sinks {
-		if c.Sinks[i].BlobThresholdBytes == 0 {
-			c.Sinks[i].BlobThresholdBytes = 8192
+		s := &c.Sinks[i]
+		if s.BlobThresholdBytes == 0 {
+			s.BlobThresholdBytes = 8192
 		}
-		if c.Sinks[i].MaxPayloadBytes == 0 {
-			c.Sinks[i].MaxPayloadBytes = 8 << 20
+		if s.MaxPayloadBytes == 0 {
+			s.MaxPayloadBytes = 8 << 20
 		}
-		if len(c.Sinks[i].PartitionBy) == 0 {
-			c.Sinks[i].PartitionBy = []string{"dt", "tenant", "task_type"}
+		if len(s.PartitionBy) == 0 {
+			s.PartitionBy = []string{"dt", "tenant", "task_type"}
 		}
+		if s.TargetFileBytes == 0 {
+			// 256 MiB sits in the middle of the 128-512 MB band
+			// F-9.5 asks for.
+			s.TargetFileBytes = 256 << 20
+		}
+		if s.RollInterval == 0 {
+			s.RollInterval = 15 * time.Minute
+		}
+		if s.Compression == "" {
+			s.Compression = "zstd"
+		}
+	}
+
+	b := &c.Buffer
+	if b.MaxBytes == 0 {
+		b.MaxBytes = 8 << 30
+	}
+	if b.MaxAge == 0 {
+		b.MaxAge = 24 * time.Hour
+	}
+	if b.SegmentBytes == 0 {
+		b.SegmentBytes = 64 << 20
+	}
+	if b.BackpressureAt == 0 {
+		b.BackpressureAt = 0.8
+	}
+	if b.MaxAttempts == 0 {
+		b.MaxAttempts = 8
+	}
+	if b.BatchSize == 0 {
+		b.BatchSize = 256
+	}
+	if b.RetryBaseDelay == 0 {
+		b.RetryBaseDelay = 500 * time.Millisecond
+	}
+	if b.RetryMaxDelay == 0 {
+		b.RetryMaxDelay = 60 * time.Second
 	}
 	for i := range c.Sources {
 		if c.Sources[i].MaxRequestBytes == 0 {

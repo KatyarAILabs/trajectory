@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "trajectory.fullname" . }}
+  labels: {{- include "trajectory.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  # A headless service so each replica is addressable by a stable name, which
+  # matters when a producer should keep one session on one collector.
+  clusterIP: None
+  selector: {{- include "trajectory.selectorLabels" . | nindent 4 }}
+  ports:
+    - {name: otlp-grpc, port: {{ .Values.service.otlpGRPC }}, targetPort: otlp-grpc, protocol: TCP}
+    - {name: otlp-http, port: {{ .Values.service.otlpHTTP }}, targetPort: otlp-http, protocol: TCP}
+    - {name: native, port: {{ .Values.service.native }}, targetPort: native, protocol: TCP}
+    - {name: metrics, port: {{ .Values.service.metrics }}, targetPort: metrics, protocol: TCP}

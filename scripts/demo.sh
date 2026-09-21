@@ -28,7 +28,7 @@ echo "==> validating config"
 ./bin/cc validate -config examples/local.yaml
 
 echo "==> starting collector (lake: $LAKE)"
-rm -rf "$LAKE"
+rm -rf "$LAKE" ./var/buffer
 ./bin/cc run -config examples/local.yaml >/tmp/cc-demo.log 2>&1 &
 CC_PID=$!
 

@@ -49,6 +49,85 @@ jobs:
       - run: make tools
       - run: make verify-generated
 
+  security:
+    # F-12.2 is enforced by a lint on log call sites rather than by review,
+    # because a payload in a debug log is invisible until someone enables debug
+    # logging in production — at which point prompts and tool arguments are in
+    # a log aggregator a much larger set of people can read.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+      - run: make logcheck
+
+  container:
+    # F-12.5: the image must build, and must be non-root with no shell.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t trajectory:ci .
+      - name: Assert non-root and no shell
+        run: |
+          user=$(docker inspect -f '{{.Config.User}}' trajectory:ci)
+          if [ "$user" = "" ] || [ "$user" = "root" ] || [ "$user" = "0:0" ]; then
+            echo "::error::image runs as root (user=$user); F-12.5 requires non-root"
+            exit 1
+          fi
+          echo "image user: $user"
+          if docker run --rm --entrypoint /bin/sh trajectory:ci -c 'echo reachable' 2>/dev/null; then
+            echo "::error::image contains a shell; a distroless base must not"
+            exit 1
+          fi
+          echo "no shell in the image"
+
+  conformance:
+    # §18: the conformance suite is the definition of compliance. If a schema
+    # change breaks a reader, it breaks the published sample dataset first.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+      - run: make conform
+
+  helm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - run: helm lint deploy/helm/trajectory/
+      - name: Assert the rendered pod is non-root and read-only
+        run: |
+          helm template t deploy/helm/trajectory/ --set config.tenant=ci \
+            > /tmp/rendered.yaml
+          python3 - <<'PY'
+          import yaml, sys
+          docs = [d for d in yaml.safe_load_all(open('/tmp/rendered.yaml')) if d]
+          ss = [d for d in docs if d['kind'] == 'StatefulSet'][0]
+          spec = ss['spec']['template']['spec']
+          sc = spec['containers'][0]['securityContext']
+          problems = []
+          if not spec['securityContext'].get('runAsNonRoot'):
+              problems.append('runAsNonRoot is not set')
+          if not sc.get('readOnlyRootFilesystem'):
+              problems.append('readOnlyRootFilesystem is not set')
+          if sc.get('allowPrivilegeEscalation'):
+              problems.append('allowPrivilegeEscalation is true')
+          if sc.get('capabilities', {}).get('drop') != ['ALL']:
+              problems.append('capabilities are not all dropped')
+          if problems:
+              print('F-12.5 violations in the rendered chart:')
+              for p in problems:
+                  print('  -', p)
+              sys.exit(1)
+          print('rendered pod meets F-12.5')
+          PY
+
   licences:
     # §13 and F-12.4: permissive licences only. This gate exists from the first
     # commit so a non-permissive transitive dependency can never become

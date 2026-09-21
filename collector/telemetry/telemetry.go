@@ -19,10 +19,12 @@ package telemetry
 import (
 	"net"
 	"net/http"
+	"net/http/pprof"
 	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/trajectory-project/trajectory/internal/version"
@@ -56,16 +58,41 @@ type Metrics struct {
 	// inside the §11 no-user-data rule.
 	Sampled *prometheus.CounterVec
 
+	// Buffer metrics (§11). BufferEvicted is labelled by reason because
+	// "the buffer dropped data" and "why" are different operational
+	// questions, and the reason determines the fix: more disk, a shorter
+	// max_age, or a sink that is actually reachable.
+	BufferBytes        prometheus.Gauge
+	BufferDiskBytes    prometheus.Gauge
+	BufferOldestAge    prometheus.Gauge
+	BufferEvicted      *prometheus.CounterVec
+	BufferBackpressure prometheus.Gauge
+	Delivered          prometheus.Counter
+	DeliveryRetries    prometheus.Counter
+	DeadLettered       prometheus.Counter
+
 	ClockSkew *prometheus.HistogramVec
 	BuildInfo *prometheus.GaugeVec
 
 	ready atomic.Bool
+	pprof bool
 }
 
 // New registers the metric set.
 func New() *Metrics {
 	reg := prometheus.NewRegistry()
 	m := &Metrics{reg: reg}
+
+	// Process and Go runtime metrics. These are what make the §13 memory
+	// targets measurable rather than asserted: process_resident_memory_bytes
+	// is the number a soak test reads, and go_goroutines is how an
+	// unbounded queue shows itself before it becomes an OOM.
+	//
+	// Neither carries a label derived from user data.
+	reg.MustRegister(
+		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
+		collectors.NewGoCollector(),
+	)
 
 	m.IngestRecords = counterVec(reg, "cc_ingest_records_total",
 		"Records accepted or rejected, by source and result.", "source", "result")
@@ -102,6 +129,24 @@ func New() *Metrics {
 	m.BlobsDeduped = counter(reg, "cc_blobs_deduped_total",
 		"Payloads that matched an existing blob and were not rewritten.")
 
+	m.BufferBytes = gauge(reg, "cc_buffer_bytes",
+		"Bytes buffered but not yet delivered. This is the backlog.")
+	m.BufferDiskBytes = gauge(reg, "cc_buffer_disk_bytes",
+		"Bytes the buffer occupies on disk, including delivered records "+
+			"whose segment has not yet been reclaimed.")
+	m.BufferOldestAge = gauge(reg, "cc_buffer_oldest_age_seconds",
+		"Age of the oldest undelivered record in the buffer.")
+	m.BufferEvicted = counterVec(reg, "cc_buffer_evicted_bytes_total",
+		"Bytes dropped from the buffer, by reason.", "reason")
+	m.BufferBackpressure = gauge(reg, "cc_buffer_backpressure",
+		"1 when the buffer is above its backpressure threshold.")
+	m.Delivered = counter(reg, "cc_delivered_total",
+		"Records delivered from the buffer to a sink.")
+	m.DeliveryRetries = counter(reg, "cc_delivery_retries_total",
+		"Delivery attempts that failed and will be retried.")
+	m.DeadLettered = counter(reg, "cc_dead_lettered_total",
+		"Records that exhausted their delivery attempts.")
+
 	m.Sampled = counterVec(reg, "cc_sampled_total",
 		"Sampling decisions, by decision and rule.", "decision", "rule")
 
@@ -116,10 +161,27 @@ func New() *Metrics {
 	return m
 }
 
+// EnablePprof exposes Go profiling endpoints on the telemetry listener.
+//
+// Off by default and opt-in through config. It is genuinely useful — a
+// throughput regression is far easier to find with a profile than with a
+// guess — but /debug/pprof also exposes command-line arguments and memory
+// contents, so it must never be on by accident. The telemetry listener is
+// expected to be bound to a private interface.
+func (m *Metrics) EnablePprof() { m.pprof = true }
+
 // Handler serves /metrics, /healthz and /readyz (F-11.2).
 func (m *Metrics) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.HandlerFor(m.reg, promhttp.HandlerOpts{}))
+
+	if m.pprof {
+		mux.HandleFunc("/debug/pprof/", pprof.Index)
+		mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	}
 
 	// healthz is liveness: the process is running. It deliberately does not
 	// consult the sink, because a sink outage must not cause an orchestrator

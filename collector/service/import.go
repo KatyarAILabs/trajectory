@@ -50,6 +50,17 @@ func (s *Service) RunImport(ctx context.Context, imp importers.Importer, r io.Re
 	if dryRun {
 		return st, nil
 	}
+
+	// Episodes are in the buffer, not the sink. Drain it synchronously:
+	// `cc import` is a one-shot command, so it must not exit while records
+	// are still queued, and a failure here should be reported rather than
+	// left for a delivery loop that is about to stop.
+	if err := s.buf.Sync(); err != nil {
+		return st, fmt.Errorf("sync buffer: %w", err)
+	}
+	if _, err := s.deliverer.DrainOnce(ctx); err != nil {
+		return st, fmt.Errorf("deliver to sink: %w", err)
+	}
 	if err := s.flushSink(ctx); err != nil {
 		return st, fmt.Errorf("flush sink: %w", err)
 	}

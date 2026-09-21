@@ -1,0 +1,27 @@
+# Copyright The Trajectory Authors.
+# SPDX-License-Identifier: Apache-2.0
+#
+# A minimal OTel Collector distribution with the trajectory exporter.
+# Build:  builder --config otelcol/builder-config.yaml
+
+dist:
+  name: trajectory-otelcol
+  description: OpenTelemetry Collector with the trajectory exporter
+  output_path: ./dist/trajectory-otelcol
+  version: 0.1.0
+
+receivers:
+  - gomod: go.opentelemetry.io/collector/receiver/otlpreceiver v0.121.0
+
+processors:
+  - gomod: go.opentelemetry.io/collector/processor/batchprocessor v0.121.0
+  - gomod: go.opentelemetry.io/collector/processor/memorylimiterprocessor v0.121.0
+
+exporters:
+  - gomod: github.com/trajectory-project/trajectory/otelcol/trajectoryexporter v0.1.0
+  - gomod: go.opentelemetry.io/collector/exporter/debugexporter v0.121.0
+
+# Replace with the local checkout while the module is unpublished.
+replaces:
+  - github.com/trajectory-project/trajectory => ../..
+  - github.com/trajectory-project/trajectory/otelcol/trajectoryexporter => ./trajectoryexporter

@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -110,6 +111,7 @@ func cmdRedact(args []string) int {
 			continue
 		}
 
+		// logcheck:allow — prints a step count, never step content.
 		fmt.Printf("episode %s (%d steps)\n", ep.Episode.EpisodeID, len(ep.Steps))
 		if len(entries) == 0 {
 			fmt.Printf("  no changes\n\n")
@@ -123,10 +125,17 @@ func cmdRedact(args []string) int {
 		if *showValues {
 			// Applied to a copy, so the input file is never touched.
 			applied := ep
-			if err := r.Process(nil, applied); err == nil {
+			if err := r.Process(context.Background(), applied); err == nil {
 				fmt.Printf("\n  after redaction:\n")
 				for j, s := range applied.Steps {
 					if s.ContentInline != nil {
+						// logcheck:allow — post-redaction content, printed to
+						// the operator's terminal only behind an explicit
+						// opt-in flag. This is the whole purpose of
+						// --show-redacted-values: proving to a reviewer that
+						// the policy did what they expect. It is stdout, not
+						// the collector's logs, and the values have already
+						// been through the policy being tested.
 						fmt.Printf("    step %d: %s\n", j, truncate(*s.ContentInline, 160))
 					}
 				}

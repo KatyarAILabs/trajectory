@@ -5,6 +5,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"regexp"
 	"strings"
@@ -39,6 +40,7 @@ func (c *Config) Validate(path string) error {
 	c.validateRedaction(bad)
 	c.validateEntities(bad)
 	c.validateSampling(bad)
+	c.validateBuffer(bad)
 	c.validateSinks(bad)
 
 	if len(errs) > 0 {
@@ -80,6 +82,19 @@ func (c *Config) validateSources(bad func(string, string, ...any)) {
 			bad(key+".type", "%q is not supported; use \"otlp\" or \"native\"", s.Type)
 		}
 
+		s.HTTP.TLS.Validate(key+".http.tls", bad)
+		s.GRPC.TLS.Validate(key+".grpc.tls", bad)
+
+		// A bearer token over plaintext is a credential on the wire.
+		// Saying so at config time is cheaper than a security review
+		// finding it later.
+		if s.Auth.Type == "bearer" && s.HTTP.Listen != "" && !s.HTTP.TLS.Enabled() &&
+			!isLoopback(s.HTTP.Listen) {
+			bad(key+".auth",
+				"a bearer token is configured on a non-loopback plaintext listener (%s); "+
+					"set http.tls or bind to localhost", s.HTTP.Listen)
+		}
+
 		switch s.Auth.Type {
 		case "", "none":
 		case "bearer":
@@ -114,6 +129,19 @@ func (c *Config) validateSources(bad func(string, string, ...any)) {
 			listeners[addr] = s.Name
 		}
 	}
+}
+
+// isLoopback reports whether a listen address is reachable only from the host.
+func isLoopback(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func (c *Config) validateAssembly(bad func(string, string, ...any)) {
@@ -243,6 +271,33 @@ func (c *Config) validateSampling(bad func(string, string, ...any)) {
 	}
 }
 
+func (c *Config) validateBuffer(bad func(string, string, ...any)) {
+	b := c.Buffer
+	if b.Dir == "" {
+		// A collector with no buffer loses everything in flight when a
+		// sink is unreachable or the process is killed, which is
+		// exactly what G-4 forbids. Refusing is better than a silent
+		// downgrade in durability.
+		bad("buffer.dir", "required; without a disk buffer no acknowledged data survives "+
+			"a sink outage or a restart (F-8.1)")
+	}
+	if b.BackpressureAt <= 0 || b.BackpressureAt > 1 {
+		bad("buffer.backpressure_at", "must be between 0 and 1, got %v", b.BackpressureAt)
+	}
+	if b.MaxAttempts <= 0 {
+		bad("buffer.max_attempts", "must be positive; a record must eventually be "+
+			"dead-lettered rather than blocking everything behind it (F-8.3)")
+	}
+	if b.SegmentBytes > 0 && b.MaxBytes > 0 && b.SegmentBytes > b.MaxBytes {
+		bad("buffer.segment_bytes", "(%s) exceeds buffer.max_bytes (%s), so no segment "+
+			"could ever be sealed and reclaimed", b.SegmentBytes, b.MaxBytes)
+	}
+	if b.RetryBaseDelay > b.RetryMaxDelay && b.RetryMaxDelay > 0 {
+		bad("buffer.retry_base_delay", "(%s) exceeds retry_max_delay (%s)",
+			b.RetryBaseDelay, b.RetryMaxDelay)
+	}
+}
+
 func (c *Config) validateSinks(bad func(string, string, ...any)) {
 	if len(c.Sinks) == 0 {
 		bad("sinks", "at least one sink is required")
@@ -252,11 +307,41 @@ func (c *Config) validateSinks(bad func(string, string, ...any)) {
 		if s.Name == "" {
 			bad(key+".name", "required")
 		}
-		if s.Type != "fs" {
-			bad(key+".type", "%q is not supported in this build; only \"fs\" is", s.Type)
+
+		switch s.Type {
+		case "fs":
+			if s.Dir == "" {
+				bad(key+".dir", "required for a filesystem sink")
+			}
+		case "s3":
+			if s.Bucket == "" {
+				bad(key+".bucket", "required for an s3 sink")
+			}
+			if s.Region == "" && s.Endpoint == "" {
+				bad(key+".region", "required unless an endpoint is set")
+			}
+			switch s.SSE.Type {
+			case "", "AES256":
+			case "aws:kms":
+				if s.SSE.KeyID == "" {
+					bad(key+".sse.key_id",
+						"required when sse.type is aws:kms; without it the bucket "+
+							"default key is used, which defeats customer-managed keys (F-12.3)")
+				}
+			default:
+				bad(key+".sse.type", "must be \"AES256\" or \"aws:kms\", got %q", s.SSE.Type)
+			}
+			if s.AccessKeyID != "" && s.SecretAccessKey == "" {
+				bad(key+".secret_access_key", "required when access_key_id is set")
+			}
+		default:
+			bad(key+".type", "%q is not supported; use \"fs\" or \"s3\"", s.Type)
 		}
-		if s.Dir == "" {
-			bad(key+".dir", "required")
+
+		switch s.Compression {
+		case "", "zstd", "snappy", "none", "uncompressed":
+		default:
+			bad(key+".compression", "must be zstd, snappy or none, got %q", s.Compression)
 		}
 		if s.BlobThresholdBytes < 0 {
 			bad(key+".blob_threshold_bytes", "must not be negative")

@@ -41,6 +41,8 @@ func main() {
 		os.Exit(cmdInspect(os.Args[2:]))
 	case "replay":
 		os.Exit(cmdReplay(os.Args[2:]))
+	case "conform":
+		os.Exit(cmdConform(os.Args[2:]))
 	case "version":
 		fmt.Printf("cc %s (commit %s, schema %s)\n",
 			version.Collector, version.Commit, version.Schema)
@@ -64,6 +66,7 @@ Usage:
   cc redact   -config <file> --test <file>   Show what the redaction policy would do
   cc inspect  <file>                         Summarise a Parquet file, blob or manifest
   cc replay   -lake <dir> <episode-id>       Print a reconstructed episode
+  cc conform  <lake-dir>                     Check a dataset against the format spec
   cc version                                 Print version and schema version
 
 %s`, formatHelp())
@@ -142,6 +145,12 @@ func cmdRun(args []string) int {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cc run: %v\n", err)
 		return 1
+	}
+
+	if cfg.Telemetry.Pprof {
+		svc.Metrics().EnablePprof()
+		log.Warn("pprof is enabled on the telemetry listener; " +
+			"it exposes command-line arguments and memory contents")
 	}
 
 	if listen := cfg.Telemetry.Metrics.Listen; listen != "" {

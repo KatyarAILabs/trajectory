@@ -102,10 +102,32 @@ sampling:
       - "entity_key_count == 0"
     otherwise_rate: 1.0
 
+buffer:
+  # The buffer is what makes acknowledged data survive a sink outage or a
+  # restart. Sizing it is sizing how long an outage you can absorb: roughly
+  # (your bytes/sec) x (tolerable outage).
+  #
+  # It holds only redacted records, so even a seized disk contains no
+  # unredacted payloads.
+  dir: ./var/buffer
+  max_bytes: 1Gi
+  max_age: 24h
+  backpressure_at: 0.8
+  # Retries are for transient failures. A record the sink will never accept
+  # is dead-lettered immediately rather than consuming the retry budget.
+  max_attempts: 8
+  retry_base_delay: 500ms
+  retry_max_delay: 60s
+
 sinks:
   - name: local
     type: fs
     dir: ./var/lake
+    # Files trend toward a compaction-friendly size rather than one small
+    # object per flush.
+    target_file_bytes: 256Mi
+    roll_interval: 15m
+    compression: zstd
     partition_by: ["dt", "tenant", "task_type"]
     blob_threshold_bytes: 8192
 

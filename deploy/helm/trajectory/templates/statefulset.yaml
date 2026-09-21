@@ -1,0 +1,135 @@
+# A StatefulSet, not a Deployment.
+#
+# Each replica needs its own buffer volume with a stable identity. Two
+# collectors sharing one buffer directory interleave partial records and
+# corrupt the log, so the collector refuses to start when it finds the
+# directory locked. A Deployment with a shared PVC would hit that on every
+# rolling update; a StatefulSet gives each pod its own volume that follows it.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "trajectory.fullname" . }}
+  labels: {{- include "trajectory.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "trajectory.fullname" . }}
+  replicas: {{ .Values.replicaCount }}
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels: {{- include "trajectory.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "trajectory.selectorLabels" . | nindent 8 }}
+      annotations:
+        # Roll pods when the config changes, so an edit takes effect without
+        # someone having to remember to restart.
+        checksum/config: {{ toYaml .Values.config | sha256sum }}
+    spec:
+      securityContext:
+        runAsNonRoot: {{ .Values.securityContext.runAsNonRoot }}
+        runAsUser: {{ .Values.securityContext.runAsUser }}
+        runAsGroup: {{ .Values.securityContext.runAsGroup }}
+        fsGroup: {{ .Values.securityContext.runAsGroup }}
+        seccompProfile:
+          type: {{ .Values.securityContext.seccompProfile.type }}
+
+      initContainers:
+        # Validate before starting. An invalid config fails the rollout with a
+        # readable message instead of crash-looping, and `cc validate` names
+        # the file, key and reason (F-11.6).
+        - name: validate-config
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["validate", "-config", "/etc/cc/config.yaml"]
+          env:
+            - name: CC_HMAC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.name }}
+                  key: {{ .Values.secrets.hmacKeyRef }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/cc
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+
+      containers:
+        - name: collector
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["run", "-config", "/etc/cc/config.yaml"]
+
+          env:
+            # The HMAC key comes from a secret, never from the config file
+            # (F-11.1). Rotating it breaks joinability of new records against
+            # old ones, so it is long-lived by design.
+            - name: CC_HMAC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.name }}
+                  key: {{ .Values.secrets.hmacKeyRef }}
+
+          ports:
+            - {name: otlp-grpc, containerPort: 4317}
+            - {name: otlp-http, containerPort: 4318}
+            - {name: native, containerPort: 4319}
+            - {name: metrics, containerPort: 9464}
+
+          # Liveness deliberately does not consult the sink. A sink outage must
+          # not cause the orchestrator to kill a collector that is correctly
+          # buffering through it — that would turn a recoverable outage into
+          # data loss.
+          livenessProbe:
+            httpGet: {path: /healthz, port: metrics}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: {path: /readyz, port: metrics}
+            initialDelaySeconds: 2
+            periodSeconds: 5
+
+          # Long enough to stop accepting, drain assembly and flush the buffer
+          # (F-11.5). Too short and a rolling update discards in-flight
+          # episodes on every pod.
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 5"]
+
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+
+          securityContext:
+            allowPrivilegeEscalation: {{ .Values.securityContext.allowPrivilegeEscalation }}
+            readOnlyRootFilesystem: {{ .Values.securityContext.readOnlyRootFilesystem }}
+            capabilities: {{- toYaml .Values.securityContext.capabilities | nindent 14 }}
+
+          volumeMounts:
+            - name: config
+              mountPath: /etc/cc
+              readOnly: true
+            # The only writable path. Everything else runs read-only.
+            - name: buffer
+              mountPath: /var/lib/cc
+
+      # Give the collector time to drain rather than being killed mid-flush.
+      terminationGracePeriodSeconds: 60
+
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "trajectory.fullname" . }}
+
+  volumeClaimTemplates:
+    - metadata:
+        name: buffer
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.buffer.storageClass }}
+        storageClassName: {{ .Values.buffer.storageClass }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.buffer.size }}

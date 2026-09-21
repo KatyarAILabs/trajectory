@@ -1,0 +1,36 @@
+{{ include "trajectory.fullname" . }} is installed.
+
+Send telemetry to:
+  OTLP/gRPC   {{ include "trajectory.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.service.otlpGRPC }}
+  OTLP/HTTP   http://{{ include "trajectory.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.service.otlpHTTP }}/v1/traces
+
+Check it is healthy:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "trajectory.fullname" . }} {{ .Values.service.metrics }}
+  curl localhost:{{ .Values.service.metrics }}/readyz
+
+{{- if eq .Values.config.tenant "CHANGEME" }}
+
+WARNING: config.tenant is still CHANGEME. Set it before sending real traffic —
+it is recorded on every record and used as a partition key.
+{{- end }}
+
+{{- if not .Values.networkPolicy.allowEgressCIDRs }}
+{{- if .Values.networkPolicy.enabled }}
+
+WARNING: networkPolicy is enabled but allowEgressCIDRs is empty, so all egress
+except DNS is denied. The collector will not reach its sink and will buffer
+until it hits buffer.max_bytes, then start evicting the oldest data. Set
+networkPolicy.allowEgressCIDRs to your object store's range.
+{{- end }}
+{{- end }}
+
+Two metrics worth putting on a dashboard from day one:
+
+  cc_buffer_bytes
+      The undelivered backlog. Rising steadily means the sink is not keeping
+      up; flat and high means it is unreachable.
+
+  cc_episodes_without_entity_keys_ratio
+      The share of episodes carrying no business key. Those episodes can never
+      be joined to an outcome. Discovering this months later, when someone
+      tries the join, is the failure this metric exists to prevent.

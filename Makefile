@@ -30,9 +30,13 @@ test:
 	go test ./...
 
 .PHONY: lint
-lint:
+lint: logcheck
 	go vet ./...
 	@test -z "$$(gofmt -l . | grep -v '^gen/')" || { echo "gofmt needed:"; gofmt -l . | grep -v '^gen/'; exit 1; }
+
+.PHONY: logcheck
+logcheck: ## F-12.2: no log call site may write payload content
+	go run ./tools/logcheck ./collector ./cmd ./importers ./pkg ./internal ./tools
 
 .PHONY: golden
 golden: ## Regenerate the committed Parquet schema goldens. Review the diff.
@@ -49,10 +53,39 @@ verify-generated: generate ## Fail if committed generated files are stale
 licences: ## F-12.4 / §13: permissive licences only
 	go run ./tools/licensecheck
 
-.PHONY: sbom
-sbom: ## F-12.4: SBOM per release
-	@mkdir -p dist
-	go version -m $(BIN)/trajectory 2>/dev/null || echo "build the binary first"
+.PHONY: docker
+docker: ## F-12.5: distroless, non-root, read-only rootfs
+	docker build \
+	  --build-arg VERSION=$$(git describe --tags --always --dirty 2>/dev/null || echo dev) \
+	  --build-arg COMMIT=$$(git rev-parse --short HEAD 2>/dev/null || echo unknown) \
+	  -t trajectory:dev .
+
+.PHONY: sample
+sample: ## Regenerate the published sample dataset (F-10.5)
+	@rm -rf spec/testdata/sample-dataset
+	@go build -o $(BIN)/cc ./cmd/cc
+	@CC_HMAC_KEY=sample-dataset-key-published-with-the-spec \
+	  $(BIN)/cc import -config spec/testdata/sample.yaml \
+	    -from spec/testdata/langfuse-export.json langfuse
+	@$(BIN)/cc conform spec/testdata/sample-dataset
+
+.PHONY: conform
+conform: ## Run the conformance suite against the sample dataset
+	@go build -o $(BIN)/cc ./cmd/cc
+	@$(BIN)/cc conform -v spec/testdata/sample-dataset
+
+.PHONY: chaos
+chaos: ## Chaos tests: sink outage, unclean restart, partial write
+	go test ./collector/acceptance/ -run Chaos -v
+
+.PHONY: race
+race:
+	go test -race ./...
+
+.PHONY: loadtest
+loadtest: ## Measure the §13 throughput and memory targets
+	@echo "start the collector first:  CC_HMAC_KEY=x ./bin/cc run -config examples/local.yaml"
+	go run ./tools/loadtest -duration 30s -workers 8
 
 .PHONY: help
 help:

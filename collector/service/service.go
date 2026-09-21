@@ -29,16 +29,18 @@ import (
 	"github.com/oklog/ulid/v2"
 
 	"github.com/trajectory-project/trajectory/collector/assemble"
+	"github.com/trajectory-project/trajectory/collector/buffer"
 	"github.com/trajectory-project/trajectory/collector/config"
 	"github.com/trajectory-project/trajectory/collector/extract"
 	"github.com/trajectory-project/trajectory/collector/normalize"
 	"github.com/trajectory-project/trajectory/collector/pipeline"
 	"github.com/trajectory-project/trajectory/collector/redact"
 	"github.com/trajectory-project/trajectory/collector/sample"
-	"github.com/trajectory-project/trajectory/collector/sink/fsstore"
+	"github.com/trajectory-project/trajectory/collector/sink/lake"
 	"github.com/trajectory-project/trajectory/collector/source/native"
 	"github.com/trajectory-project/trajectory/collector/source/otlp"
 	"github.com/trajectory-project/trajectory/collector/telemetry"
+	"github.com/trajectory-project/trajectory/collector/tlsconf"
 	"github.com/trajectory-project/trajectory/pkg/record"
 )
 
@@ -53,7 +55,9 @@ type Service struct {
 	redactor  *redact.Redactor
 	extractor *extract.Extractor
 	sampler   *sample.Sampler
-	sink      *fsstore.Sink
+	sink      *lake.Sink
+	buf       *buffer.Buffer
+	deliverer *buffer.Deliverer
 
 	// quarantineDir holds records that failed a processor. They are written
 	// as JSON so an operator can inspect why, without a query engine.
@@ -66,6 +70,9 @@ type Service struct {
 	// rather than being re-set to a running total.
 	lastFiles        int64
 	lastBlobsDeduped int64
+	lastDelivered    int64
+	lastRetries      int64
+	lastDeadLettered int64
 	// sampledOut counts episodes dropped by tail sampling, reported by
 	// `cc import` so a partner is not puzzled by a smaller corpus.
 	sampledOut int64
@@ -77,12 +84,75 @@ type Service struct {
 func New(cfg *config.Config, log *slog.Logger) (*Service, error) {
 	s := &Service{cfg: cfg, log: log, metrics: telemetry.New()}
 
-	sink, err := fsstore.New(cfg.Sinks[0])
+	store, err := newStore(cfg.Sinks[0])
+	if err != nil {
+		return nil, err
+	}
+
+	sink, err := lake.New(lake.Options{
+		Name:               cfg.Sinks[0].Name,
+		Store:              store,
+		PartitionBy:        cfg.Sinks[0].PartitionBy,
+		BlobThresholdBytes: cfg.Sinks[0].BlobThresholdBytes,
+		MaxPayloadBytes:    cfg.Sinks[0].MaxPayloadBytes,
+		TargetFileBytes:    int64(cfg.Sinks[0].TargetFileBytes),
+		RollInterval:       cfg.Sinks[0].RollInterval,
+		Compression:        cfg.Sinks[0].Compression,
+	})
 	if err != nil {
 		return nil, err
 	}
 	s.sink = sink
-	s.quarantineDir = filepath.Join(cfg.Sinks[0].Dir, "quarantine")
+
+	// Quarantine is local even for a remote sink: a record that failed
+	// redaction must not be shipped anywhere, and the local path is the one
+	// an operator can reach to work out why.
+	s.quarantineDir = cfg.Buffer.Dir
+	if s.quarantineDir == "" {
+		s.quarantineDir = cfg.Sinks[0].Dir
+	}
+	s.quarantineDir = filepath.Join(s.quarantineDir, "quarantine")
+
+	// The buffer is what makes acknowledged data survive a sink outage or a
+	// restart (F-8.1, G-4). Everything in it has already been redacted, so
+	// even a seized disk holds no unredacted payloads (F-5.3).
+	s.buf, err = buffer.Open(buffer.Options{
+		Dir:            cfg.Buffer.Dir,
+		MaxBytes:       int64(cfg.Buffer.MaxBytes),
+		MaxAge:         cfg.Buffer.MaxAge,
+		SegmentBytes:   int64(cfg.Buffer.SegmentBytes),
+		BackpressureAt: cfg.Buffer.BackpressureAt,
+		OnEvict: func(reason string, _ int, bytes int64) {
+			s.metrics.BufferEvicted.WithLabelValues(reason).Add(float64(bytes))
+			log.Warn("buffer evicted data", "reason", reason, "bytes", bytes)
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	dlq := cfg.Buffer.DeadLetterDir
+	if dlq == "" {
+		dlq = filepath.Join(cfg.Buffer.Dir, "dead-letter")
+	}
+	s.deliverer = buffer.NewDeliverer(s.buf, s.deliver, buffer.DeliveryOptions{
+		MaxAttempts:   cfg.Buffer.MaxAttempts,
+		BaseDelay:     cfg.Buffer.RetryBaseDelay,
+		MaxDelay:      cfg.Buffer.RetryMaxDelay,
+		DeadLetterDir: dlq,
+		BatchSize:     cfg.Buffer.BatchSize,
+		// Commit runs once per batch. Records are acknowledged only
+		// after it returns, so a crash between the sink write and the
+		// commit redelivers rather than loses (F-8.4).
+		Commit: func(ctx context.Context) error { return s.sink.FlushDue(ctx) },
+		OnError: func(attempt int, err error) {
+			s.metrics.SinkErrors.WithLabelValues(s.sink.Name(), "deliver").Inc()
+			// The error text comes from the store, which redacts
+			// credentials before returning it (F-12.2).
+			log.Warn("sink delivery failed, will retry",
+				"attempt", attempt, "error", err)
+		},
+	})
 
 	// The HMAC key comes from the environment, never from the config file
 	// (F-11.1). Config validation has already checked it is present.
@@ -130,6 +200,15 @@ func New(cfg *config.Config, log *slog.Logger) (*Service, error) {
 			token = os.Getenv(sc.Auth.TokenEnv)
 		}
 
+		httpTLS, err := tlsconf.Build(sc.HTTP.TLS)
+		if err != nil {
+			return nil, fmt.Errorf("source %q: %w", sc.Name, err)
+		}
+		grpcTLS, err := tlsconf.Build(sc.GRPC.TLS)
+		if err != nil {
+			return nil, fmt.Errorf("source %q: %w", sc.Name, err)
+		}
+
 		switch sc.Type {
 		case "native":
 			s.sources = append(s.sources, native.New(native.Options{
@@ -138,6 +217,7 @@ func New(cfg *config.Config, log *slog.Logger) (*Service, error) {
 				Tenant:          cfg.Tenant,
 				MaxRequestBytes: sc.MaxRequestBytes,
 				AuthToken:       token,
+				TLSConfig:       httpTLS,
 			}))
 		default:
 			s.sources = append(s.sources, otlp.New(otlp.Options{
@@ -147,8 +227,16 @@ func New(cfg *config.Config, log *slog.Logger) (*Service, error) {
 				MaxRequestBytes: sc.MaxRequestBytes,
 				SessionKeyOrder: cfg.Assembly.SessionKey,
 				Conventions:     conventions,
+				TLSConfig:       httpTLS,
+				GRPCTLSConfig:   grpcTLS,
 			}))
 		}
+
+		log.Info("source configured",
+			"name", sc.Name, "type", sc.Type,
+			"http", sc.HTTP.Listen, "http_tls", tlsconf.Describe(sc.HTTP.TLS),
+			"grpc", sc.GRPC.Listen, "grpc_tls", tlsconf.Describe(sc.GRPC.TLS),
+			"auth", sc.Auth.Type != "" && sc.Auth.Type != "none")
 	}
 	log.Info("conventions loaded", "mappings", conventions.Names())
 
@@ -185,9 +273,29 @@ func (s *Service) Run(ctx context.Context) error {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
+	// The delivery loop drains the buffer into the sink, retrying and
+	// dead-lettering. It runs for the whole lifetime of the service.
+	deliverCtx, stopDelivery := context.WithCancel(context.Background())
+	deliveryDone := make(chan struct{})
+	go func() {
+		defer close(deliveryDone)
+		s.deliverer.Run(deliverCtx, 200*time.Millisecond)
+	}()
+	defer func() {
+		stopDelivery()
+		<-deliveryDone
+	}()
+
 	// Periodic flush so data becomes durable without waiting for shutdown.
 	flush := time.NewTicker(5 * time.Second)
 	defer flush.Stop()
+
+	// The buffer is fsynced on a timer rather than per append: an fsync per
+	// episode would cap throughput far below the §13 target, and
+	// at-least-once already tolerates redelivering the last unsynced
+	// records after a crash.
+	sync := time.NewTicker(time.Second)
+	defer sync.Stop()
 
 	s.metrics.SetReady(true)
 	s.log.Info("collector ready",
@@ -209,9 +317,19 @@ func (s *Service) Run(ctx context.Context) error {
 		case <-ticker.C:
 			s.assembler.Expire()
 			s.metrics.EpisodesInFlight.Set(float64(s.assembler.InFlight()))
+			s.reportBufferMetrics()
+
+		case <-sync.C:
+			if err := s.buf.Sync(); err != nil {
+				s.log.Error("buffer sync failed", "error", err)
+			}
+			s.buf.EvictExpired()
 
 		case <-flush.C:
-			if err := s.flushSink(context.WithoutCancel(ctx)); err != nil {
+			// FlushDue rather than Flush: files should reach a
+			// compaction-friendly size rather than one small object
+			// per tick (F-9.5).
+			if err := s.sink.FlushDue(context.WithoutCancel(ctx)); err != nil {
 				s.log.Error("sink flush failed", "error", err)
 			}
 		}
@@ -231,12 +349,64 @@ func (s *Service) drain() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	if err := s.flushSink(ctx); err != nil {
-		return err
+	// Everything is in the buffer at this point. Sync first so a kill
+	// during the drain still leaves it recoverable, then try to deliver
+	// what we can within the deadline.
+	if err := s.buf.Sync(); err != nil {
+		s.log.Error("buffer sync failed during shutdown", "error", err)
 	}
+
+	if _, err := s.deliverer.DrainOnce(ctx); err != nil {
+		// Not fatal: anything undelivered stays in the buffer and is
+		// redelivered on the next start. That is the buffer doing its
+		// job, not a failure (F-8.1).
+		s.log.Warn("could not drain the buffer before the deadline; "+
+			"the remainder will be delivered on next start", "error", err)
+	}
+	if err := s.sink.Flush(ctx); err != nil {
+		s.log.Error("final sink flush failed", "error", err)
+	}
+
+	st := s.deliverer.Stats()
 	s.log.Info("shutdown complete",
-		"episodes_emitted", s.emitted, "quarantined", s.quarantined)
+		"episodes_emitted", s.emitted,
+		"quarantined", s.quarantined,
+		"delivered", st.Delivered,
+		"dead_lettered", st.DeadLettered,
+		"buffer_bytes_remaining", s.buf.Bytes())
 	return nil
+}
+
+// reportBufferMetrics publishes the §11 buffer gauges.
+func (s *Service) reportBufferMetrics() {
+	// The backlog, not the on-disk total: see Buffer.PendingBytes.
+	s.metrics.BufferBytes.Set(float64(s.buf.PendingBytes()))
+	s.metrics.BufferDiskBytes.Set(float64(s.buf.Bytes()))
+	s.metrics.BufferOldestAge.Set(s.buf.OldestAge().Seconds())
+
+	backpressure := 0.0
+	if s.buf.UnderBackpressure() {
+		backpressure = 1
+	}
+	s.metrics.BufferBackpressure.Set(backpressure)
+
+	st := s.deliverer.Stats()
+	s.mu.Lock()
+	newDelivered := st.Delivered - s.lastDelivered
+	newRetries := st.Retries - s.lastRetries
+	newDead := st.DeadLettered - s.lastDeadLettered
+	s.lastDelivered, s.lastRetries, s.lastDeadLettered = st.Delivered, st.Retries, st.DeadLettered
+	s.mu.Unlock()
+
+	if newDelivered > 0 {
+		s.metrics.Delivered.Add(float64(newDelivered))
+	}
+	if newRetries > 0 {
+		s.metrics.DeliveryRetries.Add(float64(newRetries))
+	}
+	if newDead > 0 {
+		s.metrics.DeadLettered.Add(float64(newDead))
+	}
 }
 
 func (s *Service) flushSink(ctx context.Context) error {
@@ -277,6 +447,15 @@ func (s *Service) onEnvelope(_ context.Context, env pipeline.Envelope) error {
 		s.metrics.Sampled.WithLabelValues("dropped", "head").Inc()
 		s.metrics.IngestRecords.WithLabelValues(env.Source, "head_sampled").Inc()
 		return nil
+	}
+
+	// Backpressure: when the buffer is above its threshold, refuse rather
+	// than accept data we may not be able to hold. The source turns this
+	// into a retryable 503, so a producer slows down instead of losing
+	// records (F-8.2).
+	if s.buf.UnderBackpressure() {
+		s.metrics.IngestRecords.WithLabelValues(env.Source, "backpressure").Inc()
+		return errBackpressure
 	}
 
 	s.metrics.IngestRecords.WithLabelValues(env.Source, "accepted").Inc()
@@ -339,15 +518,51 @@ func (s *Service) onEpisode(ep *pipeline.Assembled) {
 		return
 	}
 
-	if err := s.sink.Write(ctx, []*pipeline.Assembled{ep}); err != nil {
-		s.metrics.SinkErrors.WithLabelValues(s.sink.Name(), "write").Inc()
-		s.log.Error("sink write failed", "error", err, "episode_id", ep.Episode.EpisodeID)
+	// Into the buffer, not the sink. The sink is reached by the delivery
+	// loop, which retries and dead-letters; writing directly here would
+	// lose the episode the moment the sink is unreachable (F-8.1).
+	payload, err := json.Marshal(ep)
+	if err != nil {
+		s.log.Error("cannot encode episode for the buffer",
+			"error", err, "episode_id", ep.Episode.EpisodeID)
+		return
+	}
+
+	if err := s.buf.Append(payload); err != nil {
+		// The buffer is full and could not make room. This is the
+		// disk-full case: the record is refused rather than the buffer
+		// being corrupted (§12).
+		s.metrics.SinkErrors.WithLabelValues(s.sink.Name(), "buffer_full").Inc()
+		s.log.Error("buffer is full, episode dropped",
+			"episode_id", ep.Episode.EpisodeID, "error", err)
 		return
 	}
 
 	s.mu.Lock()
 	s.emitted++
 	s.mu.Unlock()
+}
+
+// deliver is the delivery loop's send function: decode one buffered record and
+// hand it to the sink.
+func (s *Service) deliver(ctx context.Context, payload []byte) error {
+	var ep pipeline.Assembled
+	if err := json.Unmarshal(payload, &ep); err != nil {
+		// A record that cannot be decoded will never succeed, so it is
+		// marked permanent: it dead-letters immediately rather than
+		// consuming the retry budget and delaying everything behind it.
+		return buffer.Permanent(fmt.Errorf("undecodable buffered record: %w", err))
+	}
+
+	// The sink buffers; the deliverer's Commit makes the batch durable.
+	// Flushing here instead would mean one object per record, which is both
+	// far slower and produces files nothing can compact.
+	start := time.Now()
+	if err := s.sink.Write(ctx, []*pipeline.Assembled{&ep}); err != nil {
+		return err
+	}
+	s.metrics.SinkWriteDuration.WithLabelValues(s.sink.Name()).Observe(time.Since(start).Seconds())
+	return nil
 }
 
 // quarantine writes a failed episode aside with the reason (F-12 §12).
@@ -399,6 +614,9 @@ func (s *Service) onManifest(m redact.Manifest) {
 	}
 }
 
+// errBackpressure tells a source to ask its producer to retry (F-8.2).
+var errBackpressure = errors.New("collector is under backpressure")
+
 // Shutdown stops sources and flushes.
 func (s *Service) Shutdown(ctx context.Context) error {
 	var errs []error
@@ -410,5 +628,78 @@ func (s *Service) Shutdown(ctx context.Context) error {
 	if err := s.sink.Shutdown(ctx); err != nil {
 		errs = append(errs, err)
 	}
+	if s.buf != nil {
+		if err := s.buf.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
 	return errors.Join(errs...)
+}
+
+// NewEmbedded builds a service for use inside another process, such as an
+// OpenTelemetry Collector exporter (F-13.3).
+//
+// It differs from New in one respect: no sources are constructed, because the
+// host owns the receivers. Everything else — assembly, redaction, extraction,
+// sampling, buffering, the sink — is the same code, which is the point. Two
+// implementations of redaction is exactly the bug nobody finds until a payload
+// turns up in a lake.
+func NewEmbedded(cfg *config.Config, log *slog.Logger) (*Service, error) {
+	s, err := New(cfg, log)
+	if err != nil {
+		return nil, err
+	}
+	s.sources = nil
+	return s, nil
+}
+
+// Ingest hands one envelope to the pipeline. It is how an embedding host feeds
+// the collector in place of a source.
+func (s *Service) Ingest(ctx context.Context, env pipeline.Envelope) error {
+	return s.onEnvelope(ctx, env)
+}
+
+// RunBackground runs the assembly expiry, buffer sync and delivery loops
+// without owning any listeners. It blocks until ctx is cancelled.
+func (s *Service) RunBackground(ctx context.Context) {
+	deliverCtx, stopDelivery := context.WithCancel(context.Background())
+	deliveryDone := make(chan struct{})
+	go func() {
+		defer close(deliveryDone)
+		s.deliverer.Run(deliverCtx, 200*time.Millisecond)
+	}()
+	defer func() {
+		stopDelivery()
+		<-deliveryDone
+	}()
+
+	expire := time.NewTicker(time.Second)
+	defer expire.Stop()
+	flush := time.NewTicker(5 * time.Second)
+	defer flush.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			s.assembler.Flush(record.StatusTimedOut)
+			drainCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			_ = s.buf.Sync()
+			_, _ = s.deliverer.DrainOnce(drainCtx)
+			_ = s.sink.Flush(drainCtx)
+			return
+
+		case <-expire.C:
+			s.assembler.Expire()
+			s.metrics.EpisodesInFlight.Set(float64(s.assembler.InFlight()))
+			s.reportBufferMetrics()
+			_ = s.buf.Sync()
+			s.buf.EvictExpired()
+
+		case <-flush.C:
+			if err := s.sink.FlushDue(context.WithoutCancel(ctx)); err != nil {
+				s.log.Error("sink flush failed", "error", err)
+			}
+		}
+	}
 }

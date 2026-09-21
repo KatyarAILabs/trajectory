@@ -11,6 +11,7 @@ package native
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -32,6 +33,8 @@ type Options struct {
 	// AuthToken, when set, is required as a bearer token on every request
 	// (F-12.1).
 	AuthToken string
+	// TLSConfig, when set, wraps the listener.
+	TLSConfig *tls.Config
 }
 
 // Receiver serves the native HTTP API.
@@ -91,6 +94,10 @@ func (r *Receiver) Start(ctx context.Context, next pipeline.Next) error {
 	ln, err := net.Listen("tcp", r.opts.Listen)
 	if err != nil {
 		return fmt.Errorf("native source %q: listen %s: %w", r.opts.Name, r.opts.Listen, err)
+	}
+	if r.opts.TLSConfig != nil {
+		r.srv.TLSConfig = r.opts.TLSConfig
+		ln = tls.NewListener(ln, r.opts.TLSConfig)
 	}
 
 	go func() {

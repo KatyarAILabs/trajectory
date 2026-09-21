@@ -75,6 +75,6 @@ func (s *Service) ImportResult() ImportResult {
 		Episodes:         s.emitted,
 		Quarantined:      s.quarantined,
 		Sampled:          s.sampledOut,
-		WithoutKeysRatio: s.extractor.CoverageRatio(),
+		WithoutKeysRatio: s.policy().extractor.CoverageRatio(),
 	}
 }

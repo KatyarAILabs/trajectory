@@ -20,6 +20,11 @@ kind: fixed
 fixed_kind: llm
 
 fields:
+  # Identifies one call, so a gateway that retries its own callback does not
+  # produce a duplicate step.
+  span_id:
+    - "$.litellm_call_id"
+    - "$.id"
   session_key:
     - "$.litellm_params.metadata.session_id"
     - "$.litellm_params.metadata.trace_id"
@@ -56,6 +61,10 @@ fields:
 
   finish_reason:
     - "$.response.choices[0].finish_reason"
+
+  # LiteLLM computes cost from its own price table (F-4.3).
+  cost:
+    - "$.response_cost"
 
   started_at:
     - "$.start_time"

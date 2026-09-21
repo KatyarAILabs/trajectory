@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/trajectory-project/trajectory/collector/pipeline"
 	"github.com/trajectory-project/trajectory/pkg/record"
@@ -84,6 +85,7 @@ type Step struct {
 	Trainable   string       `json:"trainable"`
 
 	FinishReason string            `json:"finish_reason"`
+	CostUSD      *float64          `json:"cost_usd"`
 	StartedAt    Int64             `json:"started_at"`
 	LatencyMs    *int32            `json:"latency_ms"`
 	Error        *Error            `json:"error"`
@@ -190,11 +192,15 @@ func (e Episode) ToEnvelopes(sourceName, defaultTenant string) ([]pipeline.Envel
 		if step.StartedAt == 0 {
 			step.StartedAt = int64(e.StartedAt)
 		}
+		if step.StartedAt == 0 {
+			step.StartedAt = receivedNow()
+		}
 
 		env := pipeline.Envelope{
 			// The producer's episode id is the grouping key, so two
 			// requests carrying the same id converge on one episode.
 			SessionKey: e.EpisodeID,
+			EpisodeID:  e.EpisodeID,
 			Source:     sourceName,
 			SpanID:     fmt.Sprintf("%s#%d", e.EpisodeID, step.StepIdx),
 			Meta:       meta,
@@ -230,6 +236,7 @@ func (w Step) toRecord(idx int) (record.Step, error) {
 	}
 
 	s := record.Step{
+		CostUSD:   w.CostUSD,
 		StepIdx:   int32(idx),
 		Attempt:   w.Attempt,
 		Kind:      kind,
@@ -308,3 +315,17 @@ func i64(v *Int64) *int64 {
 	n := int64(*v)
 	return &n
 }
+
+func recordError(e *Error) record.Error {
+	return record.Error{Type: e.Type, Message: e.Message}
+}
+
+// receivedNow stands in for a timestamp the producer did not send.
+//
+// Leaving it zero is worse than it looks: the episode lands in a 1970-01-01
+// partition, fails the conformance suite's timestamp check, and sorts before
+// every real record. The collector clock is the best available answer. It is
+// the receive time rather than the event time, so for a producer that omits
+// timestamps, clock-skew analysis reads zero — which is honest, since there was
+// no producer clock to compare against.
+func receivedNow() int64 { return time.Now().UnixMicro() }

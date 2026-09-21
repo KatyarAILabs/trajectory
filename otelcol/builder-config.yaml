@@ -11,17 +11,20 @@ dist:
   version: 0.1.0
 
 receivers:
-  - gomod: go.opentelemetry.io/collector/receiver/otlpreceiver v0.121.0
+  - gomod: go.opentelemetry.io/collector/receiver/otlpreceiver v0.161.0
 
 processors:
-  - gomod: go.opentelemetry.io/collector/processor/batchprocessor v0.121.0
-  - gomod: go.opentelemetry.io/collector/processor/memorylimiterprocessor v0.121.0
+  - gomod: go.opentelemetry.io/collector/processor/batchprocessor v0.161.0
+  - gomod: go.opentelemetry.io/collector/processor/memorylimiterprocessor v0.161.0
 
 exporters:
   - gomod: github.com/trajectory-project/trajectory/otelcol/trajectoryexporter v0.1.0
-  - gomod: go.opentelemetry.io/collector/exporter/debugexporter v0.121.0
+  - gomod: go.opentelemetry.io/collector/exporter/debugexporter v0.161.0
 
-# Replace with the local checkout while the module is unpublished.
+# Resolve both modules from this checkout while they are unpublished.
+# Paths are relative to the generated module at dist.output_path
+# (otelcol/dist/trajectory-otelcol), not to this file. Build from otelcol/:
+#   mkdir -p dist && builder --config builder-config.yaml
 replaces:
-  - github.com/trajectory-project/trajectory => ../..
-  - github.com/trajectory-project/trajectory/otelcol/trajectoryexporter => ./trajectoryexporter
+  - github.com/trajectory-project/trajectory => ../../..
+  - github.com/trajectory-project/trajectory/otelcol/trajectoryexporter => ../../trajectoryexporter

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -33,6 +34,10 @@ func (c *Config) Validate(path string) error {
 	}
 	if c.Tenant == "" {
 		bad("tenant", "required; v1 is single-tenant per deployment")
+	}
+
+	if c.ShutdownTimeout < 0 {
+		bad("shutdown_timeout", "must not be negative")
 	}
 
 	c.validateSources(bad)
@@ -78,8 +83,45 @@ func (c *Config) validateSources(bad func(string, string, ...any)) {
 				bad(key+".grpc.listen",
 					"the native API is HTTP only; remove this or use type: otlp")
 			}
+		case "webhook":
+			if s.HTTP.Listen == "" {
+				bad(key+".http.listen", "required for a webhook source")
+			}
+			if s.Mapping == "" {
+				bad(key+".mapping", "required: a webhook source is interpreted by its mapping file")
+			} else if _, err := os.Stat(s.Mapping); err != nil {
+				bad(key+".mapping", "cannot read %s: %v", s.Mapping, err)
+			}
+		case "file":
+			if len(s.Include) == 0 {
+				bad(key+".include", "required: at least one glob pattern to tail")
+			}
+			for j, pat := range s.Include {
+				if _, err := filepath.Match(pat, ""); err != nil {
+					bad(fmt.Sprintf("%s.include[%d]", key, j), "invalid glob %q: %v", pat, err)
+				}
+			}
+			switch s.StartAt {
+			case "", "end", "beginning":
+			default:
+				bad(key+".start_at", "must be \"end\" or \"beginning\", got %q", s.StartAt)
+			}
+			if s.HTTP.Listen != "" || s.GRPC.Listen != "" {
+				bad(key, "a file source does not listen; remove http/grpc")
+			}
 		default:
-			bad(key+".type", "%q is not supported; use \"otlp\" or \"native\"", s.Type)
+			bad(key+".type", "%q is not supported; use otlp, native, webhook or file", s.Type)
+		}
+
+		if r := s.HeadSampleRate; r != nil && (*r < 0 || *r > 1) {
+			bad(key+".head_sample_rate", "must be between 0 and 1, got %v", *r)
+		}
+		if s.RateLimit.RecordsPerSecond < 0 {
+			bad(key+".rate_limit.records_per_second", "must not be negative")
+		}
+		if s.RateLimit.RecordsPerSecond > 0 && s.RateLimit.Burst <= 0 {
+			bad(key+".rate_limit.burst",
+				"must be positive when a rate is set; a burst of 0 admits nothing")
 		}
 
 		s.HTTP.TLS.Validate(key+".http.tls", bad)
@@ -163,29 +205,44 @@ func (c *Config) validateAssembly(bad func(string, string, ...any)) {
 }
 
 func (c *Config) validateRedaction(bad func(string, string, ...any)) {
-	switch c.Redaction.Default {
+	validateRedactionPolicy("redaction", c.Redaction, bad)
+
+	// Per-source overrides get exactly the same checks (F-5.7). An override
+	// is a whole policy, so a weaker one is still a policy a reviewer has to
+	// be able to trust.
+	for i, s := range c.Sources {
+		if s.Redaction != nil {
+			pol := *s.Redaction
+			applyRedactionDefaults(&pol)
+			validateRedactionPolicy(fmt.Sprintf("sources[%d].redaction", i), pol, bad)
+		}
+	}
+}
+
+func validateRedactionPolicy(prefix string, r Redaction, bad func(string, string, ...any)) {
+	switch r.Default {
 	case "deny", "allow":
 	default:
-		bad("redaction.default", "must be \"deny\" or \"allow\", got %q", c.Redaction.Default)
+		bad(prefix+".default", "must be \"deny\" or \"allow\", got %q", r.Default)
 	}
 
-	switch c.Redaction.OnError {
+	switch r.OnError {
 	case "quarantine", "pass":
 	default:
-		bad("redaction.on_error", "must be \"quarantine\" or \"pass\", got %q", c.Redaction.OnError)
+		bad(prefix+".on_error", "must be \"quarantine\" or \"pass\", got %q", r.OnError)
 	}
 	// "pass" is legal but it is the one setting that turns a policy failure
 	// into a leak, so it must never be reached by a copied config or a
 	// careless default. Requiring a second, out-of-band signal means an
 	// operator cannot enable it without knowing they did.
-	if c.Redaction.OnError == "pass" && os.Getenv("CC_ALLOW_REDACTION_PASS") != "1" {
-		bad("redaction.on_error", "\"pass\" disables fail-closed (F-5.5); "+
+	if r.OnError == "pass" && os.Getenv("CC_ALLOW_REDACTION_PASS") != "1" {
+		bad(prefix+".on_error", "\"pass\" disables fail-closed (F-5.5); "+
 			"if that is deliberate, set CC_ALLOW_REDACTION_PASS=1 as well")
 	}
 
 	needsKey := false
-	for i, r := range c.Redaction.Rules {
-		key := fmt.Sprintf("redaction.rules[%d]", i)
+	for i, r := range r.Rules {
+		key := fmt.Sprintf("%s.rules[%d]", prefix, i)
 		if r.ID == "" {
 			bad(key+".id", "required; the id appears in the redaction manifest and in metrics")
 		}
@@ -213,18 +270,18 @@ func (c *Config) validateRedaction(bad func(string, string, ...any)) {
 
 	// Metadata-only discards payloads outright, so payload-shaped settings
 	// alongside it are a sign the operator expects them to do something.
-	if c.Redaction.MetadataOnly && (len(c.Redaction.Allow) > 0 || len(c.Redaction.Rules) > 0) {
-		bad("redaction.metadata_only",
+	if r.MetadataOnly && (len(r.Allow) > 0 || len(r.Rules) > 0) {
+		bad(prefix+".metadata_only",
 			"is true, which discards every payload, but allow paths or rules are "+
 				"also configured; remove one so the intent is unambiguous")
 	}
 
-	if needsKey && !c.Redaction.MetadataOnly {
-		env := c.Redaction.Tokenization.KeyEnv
+	if needsKey && !r.MetadataOnly {
+		env := r.Tokenization.KeyEnv
 		if env == "" {
-			bad("redaction.tokenization.key_env", "required when any rule uses action \"tokenize\"")
+			bad(prefix+".tokenization.key_env", "required when any rule uses action \"tokenize\"")
 		} else if os.Getenv(env) == "" {
-			bad("redaction.tokenization.key_env",
+			bad(prefix+".tokenization.key_env",
 				"environment variable %q is unset or empty; "+
 					"tokenization without a key would produce unjoinable records", env)
 		}
@@ -291,6 +348,16 @@ func (c *Config) validateBuffer(bad func(string, string, ...any)) {
 	if b.SegmentBytes > 0 && b.MaxBytes > 0 && b.SegmentBytes > b.MaxBytes {
 		bad("buffer.segment_bytes", "(%s) exceeds buffer.max_bytes (%s), so no segment "+
 			"could ever be sealed and reclaimed", b.SegmentBytes, b.MaxBytes)
+	}
+	if env := b.Encryption.KeyEnv; env != "" {
+		v := os.Getenv(env)
+		switch {
+		case v == "":
+			bad("buffer.encryption.key_env", "environment variable %q is unset or empty", env)
+		case len(v) != 32 && len(strings.TrimSpace(v)) != 64:
+			bad("buffer.encryption.key_env",
+				"%q must hold 32 bytes or 64 hex characters (AES-256), got %d bytes", env, len(v))
+		}
 	}
 	if b.RetryBaseDelay > b.RetryMaxDelay && b.RetryMaxDelay > 0 {
 		bad("buffer.retry_base_delay", "(%s) exceeds retry_max_delay (%s)",

@@ -5,6 +5,10 @@ package redact
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -426,5 +430,90 @@ func TestRuleMatchingNothingRejected(t *testing.T) {
 
 	if _, err := New(c, testKey, nil); err == nil {
 		t.Fatal("a rule with no regex and no path was accepted")
+	}
+}
+
+// fakeDetector finds a fixed word, standing in for a model-backed service.
+type fakeDetector struct {
+	word string
+	err  error
+}
+
+func (f fakeDetector) Detect(_ context.Context, text string) ([]Finding, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	var out []Finding
+	for i := 0; i+len(f.word) <= len(text); i++ {
+		if text[i:i+len(f.word)] == f.word {
+			out = append(out, Finding{EntityType: "PERSON", Start: i, End: i + len(f.word), Score: 0.9})
+		}
+	}
+	return out, nil
+}
+
+// F-5.8: an entity no regex catches is redacted by the detector.
+func TestDetectorRedactsNames(t *testing.T) {
+	var c config.Redaction
+	c.Default = "allow"
+	r, _ := New(c, testKey, nil)
+	r.SetDetector(fakeDetector{word: "Priya Raman"}, ActionTokenize)
+
+	ep := episode("the customer Priya Raman asked for a refund")
+	if err := r.Process(context.Background(), ep); err != nil {
+		t.Fatal(err)
+	}
+	got := *ep.Steps[0].ContentInline
+	if strings.Contains(got, "Priya Raman") {
+		t.Errorf("name survived: %q", got)
+	}
+	if !strings.Contains(got, "the customer tok_") || !strings.Contains(got, "asked for a refund") {
+		t.Errorf("surrounding text damaged: %q", got)
+	}
+}
+
+// The detector being down must quarantine, not pass: if the service that finds
+// names is unavailable, the safe assumption is the names are still there.
+func TestDetectorFailureFailsClosed(t *testing.T) {
+	var c config.Redaction
+	c.Default = "allow"
+	r, _ := New(c, testKey, nil)
+	r.SetDetector(fakeDetector{err: fmt.Errorf("connection refused")}, ActionDrop)
+
+	if err := r.Process(context.Background(), episode("Priya Raman")); err == nil {
+		t.Fatal("detector outage let an episode through unchecked")
+	}
+}
+
+// End to end against an HTTP server speaking Presidio's analyzer protocol.
+func TestPresidioProtocol(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		var in struct{ Text string }
+		json.NewDecoder(req.Body).Decode(&in)
+		i := strings.Index(in.Text, "Priya")
+		json.NewEncoder(w).Encode([]Finding{
+			{EntityType: "PERSON", Start: i, End: i + 5, Score: 0.85},
+			{EntityType: "LOCATION", Start: 0, End: 3, Score: 0.2}, // below min_score
+		})
+	}))
+	defer srv.Close()
+
+	var c config.Redaction
+	c.Default = "allow"
+	c.Detector.Endpoint = srv.URL + "/analyze"
+	c.Detector.MinScore = 0.5
+	c.Detector.Action = ActionDrop
+	r, err := New(c, testKey, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ep := episode("hi Priya, welcome")
+	if err := r.Process(context.Background(), ep); err != nil {
+		t.Fatal(err)
+	}
+	got := *ep.Steps[0].ContentInline
+	if got != "hi [redacted:PERSON], welcome" {
+		t.Errorf("got %q", got)
 	}
 }

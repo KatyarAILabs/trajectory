@@ -32,7 +32,7 @@ test:
 .PHONY: lint
 lint: logcheck
 	go vet ./...
-	@test -z "$$(gofmt -l . | grep -v '^gen/')" || { echo "gofmt needed:"; gofmt -l . | grep -v '^gen/'; exit 1; }
+	@test -z "$$(gofmt -l . | grep -vE '^(gen/|otelcol/dist/|sdk/typescript/node_modules/)')" || { echo "gofmt needed:"; gofmt -l . | grep -vE '^(gen/|otelcol/dist/|sdk/typescript/node_modules/)'; exit 1; }
 
 .PHONY: logcheck
 logcheck: ## F-12.2: no log call site may write payload content

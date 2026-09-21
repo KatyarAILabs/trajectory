@@ -80,6 +80,9 @@ type Stats struct {
 	Bytes    int64
 }
 
+// BytesReceived reports cumulative request bytes (cc_ingest_bytes_total).
+func (r *Receiver) BytesReceived() int64 { return r.bytes.Load() }
+
 // Stats returns a snapshot.
 func (r *Receiver) Stats() Stats {
 	return Stats{
@@ -206,7 +209,11 @@ func (r *Receiver) handleTraces(next pipeline.Next) http.HandlerFunc {
 			// retry rather than acknowledging something that was
 			// never accepted (F-8.4, §9.1).
 			w.Header().Set("Retry-After", "1")
-			http.Error(w, "collector cannot accept data", http.StatusServiceUnavailable)
+			code := http.StatusServiceUnavailable
+			if pipeline.IsQuotaExceeded(err) {
+				code = http.StatusTooManyRequests
+			}
+			http.Error(w, "collector cannot accept data", code)
 			return
 		}
 
@@ -308,3 +315,7 @@ func attrsToMap(m pcommon.Map) map[string]string {
 	}
 	return out
 }
+
+// Rejected reports cumulative refused requests — oversized, malformed or
+// unauthorised — for cc_ingest_records_total{result="rejected"} (F-1.7).
+func (r *Receiver) Rejected() int64 { return r.rejected.Load() }

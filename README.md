@@ -4,25 +4,30 @@ Capture agent trajectories at a fidelity sufficient for offline replay and
 scoring, redact what must never leave the perimeter, and land it in cheap,
 durable, queryable storage — with no opinion about what reads it afterwards.
 
-> **Status: alpha.** Every MUST in the spec is implemented, tested, and
-> measured rather than asserted. It has not yet run unattended in someone
-> else's cluster for a week, which is the bar §16 sets for M3 — until it has,
-> treat the durability claims as tested rather than proven.
+> **Status: MVP complete.** Every MUST and every SHOULD in the spec is
+> implemented and tested, and every deployment artifact has been exercised for
+> real: the container image run read-only, the Helm chart installed on a
+> Kubernetes cluster and restarted, the OTel Collector distribution built and
+> run. What remains is listed under *Not done* below. It has not yet run
+> unattended in a design partner's cluster for a week, which is the bar §16 sets
+> for M3.
 
 ## What works today
 
 | | |
 |---|---|
-| **Ingest** | OTLP over HTTP and gRPC; a native JSON/protobuf episode API; four import formats |
+| **Ingest** | OTLP over HTTP and gRPC; native episode and span APIs in JSON and protobuf; gateway webhooks (LiteLLM, Portkey, Helicone); JSONL and container-stdout tailing; five import formats |
+| **SDKs** | Python and TypeScript, zero dependencies — the only path that captures token spans, trainable masks, seeds and tool versions |
 | **Conventions** | OpenInference and OTel GenAI, selected per span by attribute presence, defined in [versioned data files](collector/normalize/conventions) rather than code |
-| **Redaction** | Deny-by-default allow-lists, explicit deny, regex and JSONPath rules, deterministic HMAC tokenization, metadata-only mode, fail-closed quarantine |
+| **Redaction** | Deny-by-default allow-lists, explicit deny, regex and JSONPath rules, deterministic HMAC tokenization, per-source policies, an external entity detector hook, metadata-only mode, fail-closed quarantine |
 | **Assembly** | Windowed, bounded, order-independent; retries stay branches; late spans become append-only patches |
-| **Sampling** | Head by session, tail by CEL; never splits an episode |
-| **Durability** | Disk buffer surviving sink outages and unclean restarts; exponential backoff with jitter; dead-lettering; backpressure |
+| **Sampling** | Head by session, tail by CEL, per-source rate limits answering 429; never splits an episode |
+| **Durability** | Disk buffer surviving sink outages and unclean restarts, optionally encrypted at rest; exponential backoff with jitter; dead-lettering; backpressure; episodes lost to a crash are counted |
+| **Operations** | Hot reload of policy on SIGHUP; full-pipeline dry run (`cc validate -sample`); the collector's own traces over OTLP |
 | **Storage** | Parquet plus content-addressed deduplicated blobs, on local FS or any S3-compatible store, partitioned, manifest written last |
 | **Security** | TLS and mTLS, per-source tokens, customer-managed encryption keys, distroless non-root image, a CI lint that forbids payloads in logs |
 | **Deployment** | Helm chart with NetworkPolicy and per-replica buffer volumes; OTel Collector exporter; signed releases with SBOM |
-| **CLI** | `run`, `validate`, `import`, `redact --test`, `inspect`, `replay`, `conform` |
+| **CLI** | `run`, `validate [-sample]`, `import`, `redact --test`, `inspect`, `replay`, `conform` |
 
 Measured, not claimed — reproduce with `make loadtest`:
 
@@ -32,9 +37,16 @@ Measured, not claimed — reproduce with `make loadtest`:
 | < 100 MiB idle RSS | **26 MiB** idle, 66 MiB under sustained load |
 | Bounded memory | goroutines flat at 15 across a 25s soak |
 
-Still open: gateway webhook ingest (the mapping files exist, the receiver does
-not), file tailing, Kafka, Iceberg registration, per-source redaction
-overrides.
+### Not done
+
+| | Why |
+|---|---|
+| Kafka source (F-1.5) | MAY in the spec. The source interface makes it a self-contained package. |
+| Iceberg registration (F-9.8) | Deferred to v1.1 by Q-3. The manifest already carries what a catalog needs. |
+| Durable assembly state (F-3.8) | Best-effort in v1 by Q-8. Loss on an unclean stop is bounded and counted. |
+| 24-hour soak at 2× load (§15) | Needs CI hardware. Only a 25-second run has been done. |
+| A week unattended at a design partner (M3) | Needs a design partner. |
+| Published packages | Nothing is on PyPI, npm or a container registry yet, and the module path `github.com/trajectory-project/trajectory` is a placeholder. |
 
 ## Try it
 

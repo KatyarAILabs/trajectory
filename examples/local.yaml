@@ -27,6 +27,24 @@ sources:
     # Uncomment to require a bearer token. The token itself comes from the
     # environment, never from this file.
     # auth: {type: bearer, token_env: CC_SDK_TOKEN}
+    #
+    # A source over its limit gets 429 and the shed is counted, so one runaway
+    # producer cannot fill the buffer every other producer depends on.
+    rate_limit: {records_per_second: 2000, burst: 4000}
+
+  # Gateway callbacks (UC-1): organisation-wide capture with no application
+  # change. A gateway sees model calls only — not the tool calls between them.
+  # - name: litellm
+  #   type: webhook
+  #   http: {listen: "127.0.0.1:4320"}
+  #   mapping: mappings/litellm.yaml
+
+  # Tail JSONL files or Kubernetes container stdout (CRI-wrapped lines are
+  # unwrapped). Offsets persist beside the buffer, so a restart resumes.
+  # - name: agent-logs
+  #   type: file
+  #   include: ["/var/log/agents/*.jsonl"]
+  #   start_at: end
 
 assembly:
   session_key: ["session.id", "gen_ai.conversation.id", "trace_id"]
@@ -77,6 +95,15 @@ redaction:
   # other setting re-admits a payload when this is on.
   # metadata_only: true
 
+  # An external entity detector for what no regex catches — names, addresses.
+  # It receives payload text, so run it inside the same perimeter (a sidecar).
+  # If it is unreachable, the episode is quarantined, not passed through.
+  # detector:
+  #   endpoint: http://127.0.0.1:5002/analyze   # Presidio analyzer
+  #   entities: [PERSON, LOCATION]
+  #   min_score: 0.6
+  #   action: tokenize
+
 entities:
   - tool: zendesk.update_ticket
     keys:
@@ -118,6 +145,10 @@ buffer:
   max_attempts: 8
   retry_base_delay: 500ms
   retry_max_delay: 60s
+  # Encrypt buffered records at rest (AES-256-GCM). Changing or removing the
+  # key while undelivered records remain is refused, because they would
+  # become unreadable and be discarded — drain first.
+  # encryption: {key_env: CC_BUFFER_KEY}
 
 sinks:
   - name: local
@@ -134,4 +165,12 @@ sinks:
 telemetry:
   metrics:
     listen: "127.0.0.1:9464"
+  # The collector's own spans. Off unless an endpoint is set, so there is no
+  # outbound connection you did not configure. Spans carry ids and counts,
+  # never payloads.
+  # traces: {endpoint: "127.0.0.1:4317", insecure: true, sample_rate: 0.01}
   log_level: info
+
+# Policy — redaction, entities, sampling, rate limits — reloads on SIGHUP
+# without dropping in-flight data. An invalid file is refused and the running
+# policy stays. Listeners, buffer, sink and assembly changes need a restart.

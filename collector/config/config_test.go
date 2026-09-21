@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func write(t *testing.T, body string) string {
@@ -280,5 +281,24 @@ func TestSegmentLargerThanBufferRejected(t *testing.T) {
 	_, err := Load(write(t, body))
 	if err == nil {
 		t.Fatal("segment_bytes larger than max_bytes was accepted")
+	}
+}
+
+// F-11.5: the shutdown deadline is configurable, with a default.
+func TestShutdownTimeout(t *testing.T) {
+	t.Setenv("TEST_HMAC_KEY", "k")
+	cfg, err := Load(write(t, valid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ShutdownTimeout != 30*time.Second {
+		t.Errorf("default = %v, want 30s", cfg.ShutdownTimeout)
+	}
+	cfg, err = Load(write(t, "shutdown_timeout: 45s\n"+valid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ShutdownTimeout != 45*time.Second {
+		t.Errorf("configured = %v, want 45s", cfg.ShutdownTimeout)
 	}
 }

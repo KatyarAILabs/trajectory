@@ -10,14 +10,18 @@ kind: fixed
 fixed_kind: llm
 
 fields:
+  # Identifies one call, so a gateway that retries its own callback does not
+  # produce a duplicate step.
+  span_id:
+    - "$.request.id"
   session_key:
-    - "$.request.properties.Helicone-Session-Id"
+    - "$.request.properties['Helicone-Session-Id']"
     - "$.request.properties.session_id"
     - "$.request.id"
   group_id:
     - "$.request.properties.group_id"
   task_type:
-    - "$.request.properties.Helicone-Session-Path"
+    - "$.request.properties['Helicone-Session-Path']"
 
   input:
     - "$.request.body.messages"

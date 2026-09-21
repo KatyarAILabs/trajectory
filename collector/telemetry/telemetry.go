@@ -57,6 +57,14 @@ type Metrics struct {
 	// operator-authored config text, not user data, which is what keeps it
 	// inside the §11 no-user-data rule.
 	Sampled *prometheus.CounterVec
+	// Shed counts records refused before the buffer, by source and reason
+	// (quota or backpressure). F-7.3 asks for "a metric for what was shed".
+	Shed *prometheus.CounterVec
+	// LostOnRestart is the F-3.8 metric: in-flight episodes the previous
+	// process held when it stopped uncleanly.
+	LostOnRestart prometheus.Counter
+	// ConfigReloads counts hot reloads by result (F-11.4, §12).
+	ConfigReloads *prometheus.CounterVec
 
 	// Buffer metrics (§11). BufferEvicted is labelled by reason because
 	// "the buffer dropped data" and "why" are different operational
@@ -146,6 +154,13 @@ func New() *Metrics {
 		"Delivery attempts that failed and will be retried.")
 	m.DeadLettered = counter(reg, "cc_dead_lettered_total",
 		"Records that exhausted their delivery attempts.")
+
+	m.Shed = counterVec(reg, "cc_shed_total",
+		"Records refused before buffering, by source and reason.", "source", "reason")
+	m.LostOnRestart = counter(reg, "cc_assembly_lost_on_restart_total",
+		"In-flight episodes the previous process held when it stopped without draining.")
+	m.ConfigReloads = counterVec(reg, "cc_config_reloads_total",
+		"Configuration reloads, by result.", "result")
 
 	m.Sampled = counterVec(reg, "cc_sampled_total",
 		"Sampling decisions, by decision and rule.", "decision", "rule")

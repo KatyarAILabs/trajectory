@@ -11,6 +11,11 @@ kind: fixed
 fixed_kind: llm
 
 fields:
+  # Identifies one call, so a gateway that retries its own callback does not
+  # produce a duplicate step.
+  span_id:
+    - "$.id"
+    - "$.request_id"
   session_key:
     - "$.metadata.session_id"
     - "$.metadata._user"

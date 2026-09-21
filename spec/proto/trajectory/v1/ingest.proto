@@ -1,0 +1,61 @@
+// Copyright The Trajectory Authors.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Wire messages for the native ingest API (§9.1, §9.2).
+//
+// These are request envelopes, not tables: nothing here is written to Parquet,
+// so they sit outside the storage contract that the golden and parity tests
+// pin. Adding them is an additive change to the package (F-10.1).
+
+syntax = "proto3";
+
+package trajectory.v1;
+
+import "trajectory/v1/common.proto";
+import "trajectory/v1/episode.proto";
+import "trajectory/v1/step.proto";
+
+option go_package = "github.com/trajectory-project/trajectory/gen/go/trajectory/v1;trajectoryv1";
+
+// EpisodeWithSteps is one complete episode as a producer emits it (§9.1).
+// Steps are nested here and split into their own table on write.
+message EpisodeWithSteps {
+  Episode episode = 1;
+  repeated Step steps = 2;
+}
+
+// EpisodeBatch is the protobuf body of POST /v1/episodes.
+message EpisodeBatch {
+  repeated EpisodeWithSteps episodes = 1;
+}
+
+// SpanRecord is one observation for the collector to assemble (§9.2).
+//
+// It is the partial-emit counterpart of an episode: a producer that cannot hold
+// a whole trajectory in memory sends steps as they happen, keyed by session,
+// and the collector groups them with the same windowing, deduplication and
+// settle logic it applies to OTLP spans.
+message SpanRecord {
+  // Groups observations into an episode (F-3.1). Required.
+  string session_id = 1;
+  // Identifies this observation for deduplication. A redelivery with the
+  // same span_id replaces rather than duplicates.
+  string span_id = 2;
+  string parent_span_id = 3;
+  // Marks the end of the episode (F-3.3).
+  bool terminal = 4;
+
+  optional string task_type = 5;
+  optional string group_id = 6;
+  optional string instrumentation = 7;
+  optional string instrumentation_version = 8;
+  optional Error episode_error = 9;
+  map<string, string> episode_raw = 10;
+
+  Step step = 11;
+}
+
+// SpanBatch is the protobuf body of POST /v1/spans.
+message SpanBatch {
+  repeated SpanRecord spans = 1;
+}

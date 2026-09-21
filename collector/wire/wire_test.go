@@ -208,3 +208,24 @@ func TestEmptyStepsRejected(t *testing.T) {
 		t.Fatal("episode with no steps accepted")
 	}
 }
+
+// A producer that omits started_at must not produce an episode dated 1970.
+func TestMissingTimestampDefaultsToReceiveTime(t *testing.T) {
+	recs, err := DecodeSpans([]byte(`{"session_id":"s","span_id":"a","step":{"kind":"llm"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := recs[0].ToEnvelope("sdk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.Step.StartedAt < 1_700_000_000_000_000 {
+		t.Errorf("started_at = %d; an omitted timestamp became the epoch", env.Step.StartedAt)
+	}
+
+	eps, _ := DecodeEpisodes([]byte(`{"episode_id":"e","steps":[{"kind":"llm"}]}`))
+	envs, _ := eps[0].ToEnvelopes("sdk", "")
+	if envs[0].Step.StartedAt < 1_700_000_000_000_000 {
+		t.Errorf("episode step started_at = %d", envs[0].Step.StartedAt)
+	}
+}

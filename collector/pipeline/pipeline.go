@@ -40,6 +40,12 @@ type Envelope struct {
 	// SessionKey groups observations into an episode (F-3.1). Empty means
 	// the producer supplied nothing usable and the record is unassemblable.
 	SessionKey string
+	// EpisodeID, when a producer supplies one, becomes the stored
+	// episode_id. It is what makes the native API idempotent on episode_id
+	// (§9.1) and lets a producer look up its own episode. Empty means the
+	// collector assigns one, as it must for OTLP, where no convention names
+	// an episode.
+	EpisodeID string
 	// Source is the configured source that produced this (F-1.6).
 	Source string
 	// SpanID and ParentSpanID preserve the tree so retries and abandoned

@@ -142,6 +142,9 @@ type Step struct {
 	LatencyMs    *int32            `parquet:"latency_ms,optional"`
 	Error        *Error            `parquet:"error,optional"`
 	Raw          map[string]string `parquet:"raw,optional"`
+	// CostUSD is reported cost when the source provides it (F-4.3). It is
+	// the last column on purpose: fields are only ever appended (F-10.1).
+	CostUSD *float64 `parquet:"cost_usd,optional"`
 }
 
 // Blob is a payload externalised above the inline threshold, addressed by the

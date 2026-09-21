@@ -60,4 +60,8 @@ message Step {
   optional int32 latency_ms = 22;
   optional Error error = 23;
   map<string, string> raw = 24;
+  // Cost of the call in US dollars, when the source reports it (F-4.3).
+  // Appended rather than inserted: within a major version the schema only
+  // grows at the end (F-10.1).
+  optional double cost_usd = 25;
 }

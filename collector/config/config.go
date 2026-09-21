@@ -34,14 +34,32 @@ type Config struct {
 	Entities  []Entity  `yaml:"entities"`
 	Sampling  Sampling  `yaml:"sampling"`
 	Buffer    Buffer    `yaml:"buffer"`
-	Sinks     []Sink    `yaml:"sinks"`
-	Telemetry Telemetry `yaml:"telemetry"`
+	// ShutdownTimeout bounds graceful shutdown: stop accepting, drain
+	// assembly, deliver what the sink will take, flush (F-11.5). Anything
+	// undelivered at the deadline stays in the buffer for the next start.
+	// Keep it below the orchestrator's grace period, or the process is
+	// killed mid-flush.
+	ShutdownTimeout time.Duration `yaml:"shutdown_timeout"`
+	Sinks           []Sink        `yaml:"sinks"`
+	Telemetry       Telemetry     `yaml:"telemetry"`
 }
 
 type Source struct {
 	Name string `yaml:"name"`
-	// Type is "otlp" or "native".
+	// Type is "otlp", "native", "webhook" or "file".
 	Type string `yaml:"type"`
+
+	// Webhook: the callback path and the mapping file that interprets it
+	// (F-1.3). The path defaults to /v1/hooks/<mapping name>.
+	Path    string `yaml:"path"`
+	Mapping string `yaml:"mapping"`
+
+	// File: glob patterns to tail, and where to start in files that
+	// already exist on first run (F-1.4).
+	Include      []string      `yaml:"include"`
+	StartAt      string        `yaml:"start_at"`
+	PollInterval time.Duration `yaml:"poll_interval"`
+
 	HTTP struct {
 		Listen string         `yaml:"listen"`
 		TLS    tlsconf.Config `yaml:"tls"`
@@ -61,6 +79,23 @@ type Source struct {
 	// MaxRequestBytes rejects oversized requests with a clear error and a
 	// metric rather than buffering them (F-1.7).
 	MaxRequestBytes int64 `yaml:"max_request_bytes"`
+	// HeadSampleRate overrides sampling.head.rate for this source (F-7.1).
+	// Nil means the global rate applies.
+	HeadSampleRate *float64 `yaml:"head_sample_rate"`
+	// RateLimit bounds how fast this source may send (F-7.3). Exceeding it
+	// is answered with 429 and counted as shed, rather than letting one
+	// noisy producer fill the buffer for everyone.
+	RateLimit struct {
+		// RecordsPerSecond is the sustained rate. Zero means unlimited.
+		RecordsPerSecond float64 `yaml:"records_per_second"`
+		// Burst is how far above the rate a producer may briefly go.
+		Burst int `yaml:"burst"`
+	} `yaml:"rate_limit"`
+	// Redaction, when set, replaces the global policy for this source
+	// (F-5.7). It replaces wholesale rather than merging: a merged policy
+	// is one nobody can read in a single place, and redaction is the one
+	// setting a reviewer must be able to read in a single place.
+	Redaction *Redaction `yaml:"redaction"`
 	// MappingsDir overrides builtin convention mappings by name, so an
 	// operator can track a producer that has moved ahead of the shipped
 	// tables without waiting for a release (F-2.4).
@@ -100,6 +135,17 @@ type Redaction struct {
 	// out without rewriting it.
 	Deny  []string `yaml:"deny"`
 	Rules []Rule   `yaml:"rules"`
+	// Detector calls an external entity-detection service for what no
+	// regex catches, such as names and addresses (F-5.8). It receives
+	// payload text, so it must run inside the same perimeter.
+	Detector struct {
+		Endpoint string        `yaml:"endpoint"`
+		Language string        `yaml:"language"`
+		Entities []string      `yaml:"entities"`
+		MinScore float64       `yaml:"min_score"`
+		Action   string        `yaml:"action"`
+		Timeout  time.Duration `yaml:"timeout"`
+	} `yaml:"detector"`
 	// MetadataOnly discards every payload, keeping only structure and
 	// metadata (F-5.6). It overrides allow and rules entirely: there is no
 	// combination of other settings that lets a payload through when this
@@ -187,6 +233,11 @@ type Buffer struct {
 	// DeadLetterDir receives records that exhausted their attempts. Empty
 	// means the quarantine prefix under the sink.
 	DeadLetterDir string `yaml:"dead_letter_dir"`
+	// Encryption encrypts buffered records at rest (F-8.6). The key comes
+	// from the environment, never from this file.
+	Encryption struct {
+		KeyEnv string `yaml:"key_env"`
+	} `yaml:"encryption"`
 }
 
 type Sink struct {
@@ -234,6 +285,14 @@ type Telemetry struct {
 	Metrics struct {
 		Listen string `yaml:"listen"`
 	} `yaml:"metrics"`
+	// Traces sends the collector's own spans to an OTLP endpoint (F-11.2).
+	// Empty endpoint means off, and no connection is attempted (F-12.6).
+	Traces struct {
+		Endpoint   string  `yaml:"endpoint"`
+		Protocol   string  `yaml:"protocol"`
+		Insecure   bool    `yaml:"insecure"`
+		SampleRate float64 `yaml:"sample_rate"`
+	} `yaml:"traces"`
 	// Pprof exposes Go profiling on the telemetry listener. Off by
 	// default: /debug/pprof reveals command-line arguments and memory
 	// contents, so it must never be on by accident.
@@ -254,7 +313,14 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("config %s: %w", path, err)
 	}
+	return Parse(raw, path)
+}
 
+// Parse decodes and validates config bytes. name labels errors. It is the one
+// path every consumer of the config goes through — the CLI, and embedding hosts
+// such as the OTel Collector exporter — so a config means the same thing
+// everywhere it is accepted.
+func Parse(raw []byte, path string) (*Config, error) {
 	interpolated, err := interpolate(string(raw), path)
 	if err != nil {
 		return nil, err
@@ -316,12 +382,11 @@ func (c *Config) applyDefaults() {
 	if len(c.Assembly.SessionKey) == 0 {
 		c.Assembly.SessionKey = []string{"session.id", "gen_ai.conversation.id", "trace_id"}
 	}
-	// Closed is the default (F-5.5).
-	if c.Redaction.Default == "" {
-		c.Redaction.Default = "deny"
-	}
-	if c.Redaction.OnError == "" {
-		c.Redaction.OnError = "quarantine"
+	applyRedactionDefaults(&c.Redaction)
+	for i := range c.Sources {
+		if c.Sources[i].Redaction != nil {
+			applyRedactionDefaults(c.Sources[i].Redaction)
+		}
 	}
 	if c.Telemetry.LogLevel == "" {
 		c.Telemetry.LogLevel = "info"
@@ -348,6 +413,10 @@ func (c *Config) applyDefaults() {
 		if s.Compression == "" {
 			s.Compression = "zstd"
 		}
+	}
+
+	if c.ShutdownTimeout == 0 {
+		c.ShutdownTimeout = 30 * time.Second
 	}
 
 	b := &c.Buffer
@@ -379,5 +448,17 @@ func (c *Config) applyDefaults() {
 		if c.Sources[i].MaxRequestBytes == 0 {
 			c.Sources[i].MaxRequestBytes = 16 << 20
 		}
+	}
+}
+
+// applyRedactionDefaults fills unset policy fields. Closed is the default on
+// both axes (F-5.5): deny what is not allowed, quarantine what cannot be
+// evaluated.
+func applyRedactionDefaults(r *Redaction) {
+	if r.Default == "" {
+		r.Default = "deny"
+	}
+	if r.OnError == "" {
+		r.OnError = "quarantine"
 	}
 }

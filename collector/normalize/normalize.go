@@ -85,6 +85,12 @@ func Normalize(s Span, sourceName string, sessionKeyOrder []string, reg *Registr
 	setIfPresent(conv, attrs, FRole, &step.Role)
 	setIfPresent(conv, attrs, FFinishReason, &step.FinishReason)
 
+	if v, ok := conv.Get(attrs, FCost); ok {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			step.CostUSD = &f
+		}
+	}
+
 	step.Params = params(conv, attrs)
 	step.TokenCounts = tokenCounts(conv, attrs)
 

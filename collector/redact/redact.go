@@ -27,6 +27,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ohler55/ojg/jp"
 	"github.com/ohler55/ojg/oj"
@@ -76,6 +77,11 @@ type Redactor struct {
 	keyID        string
 
 	onManifest func(Manifest)
+
+	// detector is the optional external entity detector (F-5.8).
+	detector      Detector
+	detectAction  string
+	detectTimeout time.Duration
 
 	// Episodes are processed concurrently, so the counters need a lock.
 	// They feed §11 metrics, which must stay accurate under load — an
@@ -129,6 +135,18 @@ func New(cfg config.Redaction, key []byte, onManifest func(Manifest)) (*Redactor
 		}
 
 		r.rules = append(r.rules, rule)
+	}
+
+	if d := cfg.Detector; d.Endpoint != "" {
+		r.detector = &PresidioDetector{
+			Endpoint: d.Endpoint, Language: d.Language,
+			Entities: d.Entities, MinScore: d.MinScore,
+		}
+		r.detectAction = orDefault(d.Action, ActionTokenize)
+		r.detectTimeout = d.Timeout
+		if r.detectTimeout <= 0 {
+			r.detectTimeout = 5 * time.Second
+		}
 	}
 
 	if len(key) > 0 {
@@ -302,7 +320,27 @@ func (r *Redactor) applyField(path, value string) (string, []ManifestEntry, erro
 		})
 	}
 
+	// The detector runs after the rules, over what they left, so a value a
+	// rule already tokenized is not sent to the service at all.
+	if r.detector != nil && out != "" {
+		next, ents, err := r.applyDetector(path, out)
+		if err != nil {
+			return "", nil, err
+		}
+		out = next
+		entries = append(entries, ents...)
+	}
+
 	return out, entries, nil
+}
+
+// SetDetector replaces the entity detector, for tests and embedding hosts.
+func (r *Redactor) SetDetector(d Detector, action string) {
+	r.detector = d
+	r.detectAction = orDefault(action, ActionTokenize)
+	if r.detectTimeout <= 0 {
+		r.detectTimeout = 5 * time.Second
+	}
 }
 
 // applyPathRule redacts JSON nodes selected by a JSONPath.

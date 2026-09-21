@@ -24,21 +24,24 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/oklog/ulid/v2"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/trajectory-project/trajectory/collector/assemble"
 	"github.com/trajectory-project/trajectory/collector/buffer"
 	"github.com/trajectory-project/trajectory/collector/config"
-	"github.com/trajectory-project/trajectory/collector/extract"
 	"github.com/trajectory-project/trajectory/collector/normalize"
 	"github.com/trajectory-project/trajectory/collector/pipeline"
 	"github.com/trajectory-project/trajectory/collector/redact"
-	"github.com/trajectory-project/trajectory/collector/sample"
 	"github.com/trajectory-project/trajectory/collector/sink/lake"
+	"github.com/trajectory-project/trajectory/collector/source/filetail"
 	"github.com/trajectory-project/trajectory/collector/source/native"
 	"github.com/trajectory-project/trajectory/collector/source/otlp"
+	"github.com/trajectory-project/trajectory/collector/source/webhook"
 	"github.com/trajectory-project/trajectory/collector/telemetry"
 	"github.com/trajectory-project/trajectory/collector/tlsconf"
 	"github.com/trajectory-project/trajectory/pkg/record"
@@ -52,9 +55,12 @@ type Service struct {
 
 	sources   []pipeline.Source
 	assembler *assemble.Assembler
-	redactor  *redact.Redactor
-	extractor *extract.Extractor
-	sampler   *sample.Sampler
+	// bufferDir is fixed for the life of the process.
+	bufferDir string
+
+	// pol is swapped atomically on reload; read it once per record with
+	// s.policy() and use that value throughout, never twice.
+	pol       atomic.Pointer[policy]
 	sink      *lake.Sink
 	buf       *buffer.Buffer
 	deliverer *buffer.Deliverer
@@ -70,6 +76,9 @@ type Service struct {
 	// rather than being re-set to a running total.
 	lastFiles        int64
 	lastBlobsDeduped int64
+	lastBytes        map[string]int64
+	lastRejected     map[string]int64
+	lastRedactErrors map[string]int64
 	lastDelivered    int64
 	lastRetries      int64
 	lastDeadLettered int64
@@ -82,7 +91,7 @@ type Service struct {
 
 // New builds a service from validated config.
 func New(cfg *config.Config, log *slog.Logger) (*Service, error) {
-	s := &Service{cfg: cfg, log: log, metrics: telemetry.New()}
+	s := &Service{cfg: cfg, log: log, metrics: telemetry.New(), bufferDir: cfg.Buffer.Dir}
 
 	store, err := newStore(cfg.Sinks[0])
 	if err != nil {
@@ -122,6 +131,7 @@ func New(cfg *config.Config, log *slog.Logger) (*Service, error) {
 		MaxAge:         cfg.Buffer.MaxAge,
 		SegmentBytes:   int64(cfg.Buffer.SegmentBytes),
 		BackpressureAt: cfg.Buffer.BackpressureAt,
+		EncryptionKey:  envBytes(cfg.Buffer.Encryption.KeyEnv),
 		OnEvict: func(reason string, _ int, bytes int64) {
 			s.metrics.BufferEvicted.WithLabelValues(reason).Add(float64(bytes))
 			log.Warn("buffer evicted data", "reason", reason, "bytes", bytes)
@@ -154,25 +164,11 @@ func New(cfg *config.Config, log *slog.Logger) (*Service, error) {
 		},
 	})
 
-	// The HMAC key comes from the environment, never from the config file
-	// (F-11.1). Config validation has already checked it is present.
-	var key []byte
-	if env := cfg.Redaction.Tokenization.KeyEnv; env != "" {
-		key = []byte(os.Getenv(env))
-	}
-
-	s.redactor, err = redact.New(cfg.Redaction, key, s.onManifest)
+	pol, err := buildPolicy(cfg, s.onManifest)
 	if err != nil {
 		return nil, err
 	}
-	s.extractor, err = extract.New(cfg.Entities)
-	if err != nil {
-		return nil, err
-	}
-	s.sampler, err = sample.New(cfg.Sampling)
-	if err != nil {
-		return nil, err
-	}
+	s.pol.Store(pol)
 
 	s.assembler = assemble.New(assemble.Options{
 		Tenant:              cfg.Tenant,
@@ -210,6 +206,30 @@ func New(cfg *config.Config, log *slog.Logger) (*Service, error) {
 		}
 
 		switch sc.Type {
+		case "webhook":
+			m, err := webhook.LoadMapping(sc.Mapping)
+			if err != nil {
+				return nil, fmt.Errorf("source %q: %w", sc.Name, err)
+			}
+			s.sources = append(s.sources, webhook.New(webhook.Options{
+				Name:            sc.Name,
+				Listen:          sc.HTTP.Listen,
+				Path:            sc.Path,
+				Mapping:         m,
+				MaxRequestBytes: sc.MaxRequestBytes,
+				AuthToken:       token,
+				TLSConfig:       httpTLS,
+			}))
+		case "file":
+			s.sources = append(s.sources, filetail.New(filetail.Options{
+				Name:         sc.Name,
+				Include:      sc.Include,
+				StartAt:      sc.StartAt,
+				PollInterval: sc.PollInterval,
+				// Offsets live beside the buffer, on the same
+				// persistent volume, so they survive with it.
+				StateDir: cfg.Buffer.Dir,
+			}))
 		case "native":
 			s.sources = append(s.sources, native.New(native.Options{
 				Name:            sc.Name,
@@ -240,10 +260,10 @@ func New(cfg *config.Config, log *slog.Logger) (*Service, error) {
 	}
 	log.Info("conventions loaded", "mappings", conventions.Names())
 
-	if key != nil {
+	if id := pol.redactor.KeyID(); id != "" {
 		// A key_id in the log makes a rotation visible in operational
 		// history. The key itself is never logged (F-12.2).
-		log.Info("tokenization key loaded", "key_id", s.redactor.KeyID())
+		log.Info("tokenization key loaded", "key_id", id)
 	}
 
 	return s, nil
@@ -297,11 +317,15 @@ func (s *Service) Run(ctx context.Context) error {
 	sync := time.NewTicker(time.Second)
 	defer sync.Stop()
 
+	s.reportPreviousLoss()
+	s.recordInFlight(false)
+
+	cfg := s.config()
 	s.metrics.SetReady(true)
 	s.log.Info("collector ready",
-		"tenant", s.cfg.Tenant,
+		"tenant", cfg.Tenant,
 		"sources", len(s.sources),
-		"sink", s.cfg.Sinks[0].Name)
+		"sink", cfg.Sinks[0].Name)
 
 	for {
 		select {
@@ -318,6 +342,7 @@ func (s *Service) Run(ctx context.Context) error {
 			s.assembler.Expire()
 			s.metrics.EpisodesInFlight.Set(float64(s.assembler.InFlight()))
 			s.reportBufferMetrics()
+			s.recordInFlight(false)
 
 		case <-sync.C:
 			if err := s.buf.Sync(); err != nil {
@@ -345,8 +370,11 @@ func (s *Service) Run(ctx context.Context) error {
 // trajectories actually finished.
 func (s *Service) drain() error {
 	s.assembler.Flush(record.StatusTimedOut)
+	// Assembly is empty now, so nothing held in memory can be lost. Marking
+	// the file clean is what stops the next start counting a loss.
+	defer s.recordInFlight(true)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), s.ShutdownTimeout())
 	defer cancel()
 
 	// Everything is in the buffer at this point. Sync first so a kill
@@ -373,7 +401,9 @@ func (s *Service) drain() error {
 		"quarantined", s.quarantined,
 		"delivered", st.Delivered,
 		"dead_lettered", st.DeadLettered,
-		"buffer_bytes_remaining", s.buf.Bytes())
+		// Undelivered backlog, not disk usage: a fully delivered buffer
+		// still occupies disk until its segment is reclaimed.
+		"undelivered_bytes", s.buf.PendingBytes())
 	return nil
 }
 
@@ -397,6 +427,8 @@ func (s *Service) reportBufferMetrics() {
 	newDead := st.DeadLettered - s.lastDeadLettered
 	s.lastDelivered, s.lastRetries, s.lastDeadLettered = st.Delivered, st.Retries, st.DeadLettered
 	s.mu.Unlock()
+
+	s.reportPipelineCounters()
 
 	if newDelivered > 0 {
 		s.metrics.Delivered.Add(float64(newDelivered))
@@ -443,10 +475,21 @@ func (s *Service) onEnvelope(_ context.Context, env pipeline.Envelope) error {
 	// Head sampling keys on the session, not the span, so every span of a
 	// session shares one decision and an episode is never half-captured
 	// (F-7.1).
-	if !s.sampler.HeadKeep(env.SessionKey) {
+	pol := s.policy()
+	if !pol.sampler.HeadKeepFrom(env.Source, env.SessionKey) {
 		s.metrics.Sampled.WithLabelValues("dropped", "head").Inc()
 		s.metrics.IngestRecords.WithLabelValues(env.Source, "head_sampled").Inc()
 		return nil
+	}
+
+	// Quota before anything else: a source over its limit is refused with
+	// 429 and the shed is counted, so an operator can see which producer is
+	// responsible (F-7.3). The source name is operator config, not user
+	// data, which keeps it inside the §11 label rule.
+	if !pol.quotas.allow(env.Source) {
+		s.metrics.Shed.WithLabelValues(env.Source, "quota").Inc()
+		s.metrics.IngestRecords.WithLabelValues(env.Source, "quota").Inc()
+		return pipeline.ErrQuotaExceeded
 	}
 
 	// Backpressure: when the buffer is above its threshold, refuse rather
@@ -455,6 +498,7 @@ func (s *Service) onEnvelope(_ context.Context, env pipeline.Envelope) error {
 	// records (F-8.2).
 	if s.buf.UnderBackpressure() {
 		s.metrics.IngestRecords.WithLabelValues(env.Source, "backpressure").Inc()
+		s.metrics.Shed.WithLabelValues(env.Source, "backpressure").Inc()
 		return errBackpressure
 	}
 
@@ -478,8 +522,23 @@ func (s *Service) onEnvelope(_ context.Context, env pipeline.Envelope) error {
 func (s *Service) onEpisode(ep *pipeline.Assembled) {
 	ctx := context.Background()
 
-	for _, p := range []pipeline.Processor{s.redactor, s.extractor} {
+	// One policy for the whole episode, even if a reload lands midway.
+	pol := s.policy()
+
+	// Identifiers and counts only. A trace backend is readable by many more
+	// people than the lake, so no payload, argument or key value goes here.
+	ctx, span := telemetry.Tracer().Start(ctx, "trajectory.process_episode",
+		trace.WithAttributes(
+			attribute.String("trajectory.episode_id", ep.Episode.EpisodeID),
+			attribute.String("trajectory.source", ep.Episode.Source),
+			attribute.String("trajectory.status", ep.Episode.Status),
+			attribute.Int("trajectory.step_count", len(ep.Steps)),
+		))
+	defer span.End()
+
+	for _, p := range []pipeline.Processor{pol.redactorFor(ep.Episode.Source), pol.extractor} {
 		if err := p.Process(ctx, ep); err != nil {
+			span.SetAttributes(attribute.String("trajectory.quarantined_by", p.Name()))
 			s.quarantine(ep, p.Name(), err)
 			return
 		}
@@ -488,7 +547,7 @@ func (s *Service) onEpisode(ep *pipeline.Assembled) {
 	// Tail sampling runs after the processors so a rule can reference
 	// entity_key_count, and after redaction so no rule can read an
 	// unredacted value (F-7.2).
-	if !s.sampler.TailKeep(ep) {
+	if !pol.sampler.TailKeep(ep) {
 		s.metrics.Sampled.WithLabelValues("dropped", "tail").Inc()
 		s.mu.Lock()
 		s.sampledOut++
@@ -506,7 +565,7 @@ func (s *Service) onEpisode(ep *pipeline.Assembled) {
 		s.metrics.Evictions.Inc()
 	}
 	s.metrics.EntityKeysPerEpisode.Observe(float64(len(ep.Episode.EntityKeys)))
-	s.metrics.EpisodesWithoutKeysRatio.Set(s.extractor.CoverageRatio())
+	s.metrics.EpisodesWithoutKeysRatio.Set(pol.extractor.CoverageRatio())
 
 	s.mu.Lock()
 	dry := s.dryRun
@@ -614,6 +673,32 @@ func (s *Service) onManifest(m redact.Manifest) {
 	}
 }
 
+// ShutdownTimeout is the graceful-shutdown deadline (F-11.5).
+//
+// A zero or negative value means the default, enforced here rather than only in
+// config loading. A config built in code — by an embedding host, or a test —
+// never passes through Load's defaults, and a zero deadline is an
+// already-expired context: the drain would deliver nothing and the final flush
+// would write nothing, silently.
+func (s *Service) ShutdownTimeout() time.Duration {
+	if d := s.config().ShutdownTimeout; d > 0 {
+		return d
+	}
+	return 30 * time.Second
+}
+
+// config returns the configuration in force. Reload replaces s.cfg, so every
+// read goes through the lock rather than touching the field directly.
+func (s *Service) config() *config.Config {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cfg
+}
+
+// policy returns the policy in force. Callers take it once and use that value
+// for the whole record.
+func (s *Service) policy() *policy { return s.pol.Load() }
+
 // errBackpressure tells a source to ask its producer to retry (F-8.2).
 var errBackpressure = errors.New("collector is under backpressure")
 
@@ -682,7 +767,7 @@ func (s *Service) RunBackground(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			s.assembler.Flush(record.StatusTimedOut)
-			drainCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			drainCtx, cancel := context.WithTimeout(context.Background(), s.ShutdownTimeout())
 			defer cancel()
 			_ = s.buf.Sync()
 			_, _ = s.deliverer.DrainOnce(drainCtx)
@@ -702,4 +787,15 @@ func (s *Service) RunBackground(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// envBytes reads a secret from the environment, or nil when unset.
+func envBytes(name string) []byte {
+	if name == "" {
+		return nil
+	}
+	if v := os.Getenv(name); v != "" {
+		return []byte(v)
+	}
+	return nil
 }

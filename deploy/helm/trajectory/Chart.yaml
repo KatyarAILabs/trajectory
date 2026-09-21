@@ -2,6 +2,8 @@ apiVersion: v2
 name: trajectory
 description: Capture agent trajectories at replay fidelity and land them in object storage
 type: application
+# 1.30 for the native preStop sleep action; the image has no shell to exec.
+kubeVersion: ">=1.30.0-0"
 version: 0.1.0
 appVersion: "0.1.0"
 home: https://github.com/trajectory-project/trajectory

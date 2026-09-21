@@ -112,19 +112,23 @@ type Step struct {
 	ToolName    *string `protobuf:"bytes,10,opt,name=tool_name,json=toolName,proto3,oneof" json:"tool_name,omitempty"`
 	ToolVersion *string `protobuf:"bytes,11,opt,name=tool_version,json=toolVersion,proto3,oneof" json:"tool_version,omitempty"`
 	// Stable hash of normalised arguments.
-	ArgsHash      *string           `protobuf:"bytes,12,opt,name=args_hash,json=argsHash,proto3,oneof" json:"args_hash,omitempty"`
-	Model         *string           `protobuf:"bytes,13,opt,name=model,proto3,oneof" json:"model,omitempty"`
-	Provider      *string           `protobuf:"bytes,14,opt,name=provider,proto3,oneof" json:"provider,omitempty"`
-	Params        *Params           `protobuf:"bytes,15,opt,name=params,proto3,oneof" json:"params,omitempty"`
-	TokenCounts   *TokenCounts      `protobuf:"bytes,16,opt,name=token_counts,json=tokenCounts,proto3,oneof" json:"token_counts,omitempty"`
-	TokenSpans    []*TokenSpan      `protobuf:"bytes,17,rep,name=token_spans,json=tokenSpans,proto3" json:"token_spans,omitempty"`
-	Trainable     Trainable         `protobuf:"varint,18,opt,name=trainable,proto3,enum=trajectory.v1.Trainable" json:"trainable,omitempty"`
-	LogprobsRef   *string           `protobuf:"bytes,19,opt,name=logprobs_ref,json=logprobsRef,proto3,oneof" json:"logprobs_ref,omitempty"`
-	FinishReason  *string           `protobuf:"bytes,20,opt,name=finish_reason,json=finishReason,proto3,oneof" json:"finish_reason,omitempty"`
-	StartedAt     int64             `protobuf:"varint,21,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
-	LatencyMs     *int32            `protobuf:"varint,22,opt,name=latency_ms,json=latencyMs,proto3,oneof" json:"latency_ms,omitempty"`
-	Error         *Error            `protobuf:"bytes,23,opt,name=error,proto3,oneof" json:"error,omitempty"`
-	Raw           map[string]string `protobuf:"bytes,24,rep,name=raw,proto3" json:"raw,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	ArgsHash     *string           `protobuf:"bytes,12,opt,name=args_hash,json=argsHash,proto3,oneof" json:"args_hash,omitempty"`
+	Model        *string           `protobuf:"bytes,13,opt,name=model,proto3,oneof" json:"model,omitempty"`
+	Provider     *string           `protobuf:"bytes,14,opt,name=provider,proto3,oneof" json:"provider,omitempty"`
+	Params       *Params           `protobuf:"bytes,15,opt,name=params,proto3,oneof" json:"params,omitempty"`
+	TokenCounts  *TokenCounts      `protobuf:"bytes,16,opt,name=token_counts,json=tokenCounts,proto3,oneof" json:"token_counts,omitempty"`
+	TokenSpans   []*TokenSpan      `protobuf:"bytes,17,rep,name=token_spans,json=tokenSpans,proto3" json:"token_spans,omitempty"`
+	Trainable    Trainable         `protobuf:"varint,18,opt,name=trainable,proto3,enum=trajectory.v1.Trainable" json:"trainable,omitempty"`
+	LogprobsRef  *string           `protobuf:"bytes,19,opt,name=logprobs_ref,json=logprobsRef,proto3,oneof" json:"logprobs_ref,omitempty"`
+	FinishReason *string           `protobuf:"bytes,20,opt,name=finish_reason,json=finishReason,proto3,oneof" json:"finish_reason,omitempty"`
+	StartedAt    int64             `protobuf:"varint,21,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
+	LatencyMs    *int32            `protobuf:"varint,22,opt,name=latency_ms,json=latencyMs,proto3,oneof" json:"latency_ms,omitempty"`
+	Error        *Error            `protobuf:"bytes,23,opt,name=error,proto3,oneof" json:"error,omitempty"`
+	Raw          map[string]string `protobuf:"bytes,24,rep,name=raw,proto3" json:"raw,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// Cost of the call in US dollars, when the source reports it (F-4.3).
+	// Appended rather than inserted: within a major version the schema only
+	// grows at the end (F-10.1).
+	CostUsd       *float64 `protobuf:"fixed64,25,opt,name=cost_usd,json=costUsd,proto3,oneof" json:"cost_usd,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -327,11 +331,18 @@ func (x *Step) GetRaw() map[string]string {
 	return nil
 }
 
+func (x *Step) GetCostUsd() float64 {
+	if x != nil && x.CostUsd != nil {
+		return *x.CostUsd
+	}
+	return 0
+}
+
 var File_trajectory_v1_step_proto protoreflect.FileDescriptor
 
 const file_trajectory_v1_step_proto_rawDesc = "" +
 	"\n" +
-	"\x18trajectory/v1/step.proto\x12\rtrajectory.v1\x1a\x1atrajectory/v1/common.proto\"\xc8\t\n" +
+	"\x18trajectory/v1/step.proto\x12\rtrajectory.v1\x1a\x1atrajectory/v1/common.proto\"\xf5\t\n" +
 	"\x04Step\x12\x1d\n" +
 	"\n" +
 	"episode_id\x18\x01 \x01(\tR\tepisodeId\x12\x19\n" +
@@ -364,7 +375,8 @@ const file_trajectory_v1_step_proto_rawDesc = "" +
 	"\n" +
 	"latency_ms\x18\x16 \x01(\x05H\rR\tlatencyMs\x88\x01\x01\x12/\n" +
 	"\x05error\x18\x17 \x01(\v2\x14.trajectory.v1.ErrorH\x0eR\x05error\x88\x01\x01\x12.\n" +
-	"\x03raw\x18\x18 \x03(\v2\x1c.trajectory.v1.Step.RawEntryR\x03raw\x1a6\n" +
+	"\x03raw\x18\x18 \x03(\v2\x1c.trajectory.v1.Step.RawEntryR\x03raw\x12\x1e\n" +
+	"\bcost_usd\x18\x19 \x01(\x01H\x0fR\acostUsd\x88\x01\x01\x1a6\n" +
 	"\bRawEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B\r\n" +
@@ -384,7 +396,8 @@ const file_trajectory_v1_step_proto_rawDesc = "" +
 	"\r_logprobs_refB\x10\n" +
 	"\x0e_finish_reasonB\r\n" +
 	"\v_latency_msB\b\n" +
-	"\x06_error*m\n" +
+	"\x06_errorB\v\n" +
+	"\t_cost_usd*m\n" +
 	"\x04Kind\x12\x14\n" +
 	"\x10KIND_UNSPECIFIED\x10\x00\x12\f\n" +
 	"\bKIND_LLM\x10\x01\x12\r\n" +

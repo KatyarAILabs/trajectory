@@ -125,6 +125,9 @@
     "content_ref": {
       "type": "string"
     },
+    "cost_usd": {
+      "type": "number"
+    },
     "episode_id": {
       "type": "string"
     },

@@ -1,0 +1,20 @@
+{
+  "name": "@trajectory/sdk",
+  "version": "0.1.0",
+  "description": "Emit agent trajectories to a trajectory collector",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "build": "tsc -p .",
+    "test": "tsc -p . && node --test test/*.test.mjs"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0"
+  }
+}

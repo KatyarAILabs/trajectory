@@ -26,6 +26,14 @@ func (b *Buffer) Append(payload []byte) error {
 		return fmt.Errorf("buffer: closed")
 	}
 
+	if b.aead != nil {
+		sealed, err := seal(b.aead, payload)
+		if err != nil {
+			return fmt.Errorf("buffer: encrypt: %w", err)
+		}
+		payload = sealed
+	}
+
 	need := int64(headerBytes + len(payload))
 
 	// Make room by discarding fully-delivered segments before declaring the
@@ -194,8 +202,30 @@ func (b *Buffer) Next() (*Entry, error) {
 		}
 
 		entry.segID = seg.id
+		if err := b.openEntryLocked(entry, seg); err != nil {
+			b.cursorOff = entry.endOff
+			continue
+		}
 		return entry, nil
 	}
+}
+
+// openEntryLocked decrypts an entry in place. A record that fails to open is
+// reported, never handed to a sink as plaintext-shaped garbage.
+func (b *Buffer) openEntryLocked(e *Entry, seg *segment) error {
+	if b.aead == nil {
+		return nil
+	}
+	plain, err := openSealed(b.aead, e.Payload)
+	if err != nil {
+		if b.opts.OnEvict != nil {
+			b.opts.OnEvict("decrypt_failed", 1, int64(len(e.Payload)))
+		}
+		return err
+	}
+	e.Payload = plain
+	_ = seg
+	return nil
 }
 
 // Ack marks an entry delivered and advances the cursor durably.
@@ -472,6 +502,10 @@ func (b *Buffer) readFrom(segID uint64, off int64) (*Entry, error) {
 		}
 
 		entry.segID = seg.id
+		if err := b.openEntryLocked(entry, seg); err != nil {
+			segID, off = seg.id, entry.endOff
+			continue
+		}
 		return entry, nil
 	}
 }

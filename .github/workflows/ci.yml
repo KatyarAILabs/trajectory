@@ -21,8 +21,24 @@ jobs:
           go-version: '1.26'
           cache: true
 
+      # A real S3 API for the sink tests. Without it they skip, which is fine
+      # for a contributor's laptop and not fine for CI: the S3 sink is the
+      # production sink.
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=trajectory -e MINIO_ROOT_PASSWORD=trajectory-secret \
+            quay.io/minio/minio server /data
+          for i in $(seq 1 30); do curl -sf localhost:9000/minio/health/ready && break; sleep 1; done
+          docker exec minio mkdir -p /data/lake
+
       - run: make build
       - run: make test
+        env:
+          TRAJECTORY_S3_ENDPOINT: http://127.0.0.1:9000
+          TRAJECTORY_S3_BUCKET: lake
+          AWS_ACCESS_KEY_ID: trajectory
+          AWS_SECRET_ACCESS_KEY: trajectory-secret
       - run: make lint
 
       # Assembly, redaction and the sink all mutate shared counters from
@@ -127,6 +143,55 @@ jobs:
               sys.exit(1)
           print('rendered pod meets F-12.5')
           PY
+
+  otel-exporter:
+    # A separate Go module, so the OTel Collector framework is not pulled into
+    # the standalone binary. It is built and tested on its own, and a real
+    # distribution is compiled from the builder manifest so the manifest
+    # cannot rot unnoticed.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+      - name: Test the exporter module
+        working-directory: otelcol/trajectoryexporter
+        run: go test ./...
+      - name: Licence gate for the exporter module
+        working-directory: otelcol/trajectoryexporter
+        run: go run ../../tools/licensecheck
+      - name: Build an OTel Collector distribution
+        working-directory: otelcol
+        run: |
+          go install go.opentelemetry.io/collector/cmd/builder@v0.161.0
+          mkdir -p dist
+          builder --config builder-config.yaml
+          ./dist/trajectory-otelcol/trajectory-otelcol components | grep -q 'name: trajectory'
+
+  sdk-python:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ['3.9', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - working-directory: sdk/python
+        run: python -m unittest discover -s tests -v
+
+  sdk-typescript:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - working-directory: sdk/typescript
+        run: npm install && npm test
 
   licences:
     # §13 and F-12.4: permissive licences only. This gate exists from the first

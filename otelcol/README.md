@@ -26,6 +26,9 @@ builder --config otelcol/builder-config.yaml
 
 ## Configuration
 
+Settings are exactly the `cc` config format, minus `sources`, and go through
+the same strict parser — an unknown key is an error here too.
+
 ```yaml
 exporters:
   trajectory:
@@ -57,12 +60,18 @@ The `sources` section has no meaning here: the OTel Collector owns the
 receivers. Everything else is the same configuration the standalone binary
 takes, and is validated by the same code.
 
-## A caveat worth knowing before you choose this
+## Queueing and retry
 
-Running as an exporter puts the trajectory pipeline behind the host collector's
-queueing and retry, which is configured separately and does not know about the
-trajectory buffer. Two layers of retry can interact badly — the host collector
-may drop a batch the trajectory buffer would have held.
+The exporter disables the host collector's own queue and retry. The trajectory
+buffer is already a durable, bounded queue with backoff and dead-lettering; two
+layers of retry in series are hard to reason about during an outage, and the
+host's in-memory queue would drop on restart what the buffer would have held.
 
-If durability across a sink outage is the property you care about most, the
-standalone binary is the simpler thing to reason about.
+## It is a separate Go module
+
+`otelcol/trajectoryexporter` has its own `go.mod`, so the OpenTelemetry
+Collector framework is not pulled into the standalone `cc` binary. Test it with:
+
+```sh
+cd otelcol/trajectoryexporter && go test ./...
+```

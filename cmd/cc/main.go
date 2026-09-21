@@ -19,6 +19,7 @@ import (
 
 	"github.com/trajectory-project/trajectory/collector/config"
 	"github.com/trajectory-project/trajectory/collector/service"
+	"github.com/trajectory-project/trajectory/collector/telemetry"
 	"github.com/trajectory-project/trajectory/internal/version"
 )
 
@@ -77,6 +78,7 @@ Usage:
 func cmdValidate(args []string) int {
 	fs := flag.NewFlagSet("validate", flag.ExitOnError)
 	path := fs.String("config", "", "path to the config file")
+	sample := fs.String("sample", "", "dry-run: a native episode file to push through the pipeline (F-11.3)")
 	_ = fs.Parse(args)
 
 	if *path == "" {
@@ -107,6 +109,10 @@ func cmdValidate(args []string) int {
 		fmt.Printf("  sink           %s (%s) -> %s\n", s.Name, s.Type, s.Dir)
 		fmt.Printf("                 partition by %v, blob threshold %d bytes\n",
 			s.PartitionBy, s.BlobThresholdBytes)
+	}
+
+	if *sample != "" {
+		return dryRun(cfg, *sample)
 	}
 
 	// Deny-by-default with an empty allow-list is valid but almost
@@ -147,6 +153,28 @@ func cmdRun(args []string) int {
 		return 1
 	}
 
+	// The collector's own traces (F-11.2). Off unless an endpoint is set,
+	// so no outbound connection exists that an operator did not configure
+	// (F-12.6).
+	shutdownTracing, err := telemetry.SetupTracing(context.Background(), telemetry.TraceConfig{
+		Endpoint:   cfg.Telemetry.Traces.Endpoint,
+		Protocol:   cfg.Telemetry.Traces.Protocol,
+		Insecure:   cfg.Telemetry.Traces.Insecure,
+		SampleRate: cfg.Telemetry.Traces.SampleRate,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "cc run: %v\n", err)
+		return 1
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = shutdownTracing(ctx)
+	}()
+	if cfg.Telemetry.Traces.Endpoint != "" {
+		log.Info("exporting collector traces", "endpoint", cfg.Telemetry.Traces.Endpoint)
+	}
+
 	if cfg.Telemetry.Pprof {
 		svc.Metrics().EnablePprof()
 		log.Warn("pprof is enabled on the telemetry listener; " +
@@ -172,9 +200,32 @@ func cmdRun(args []string) int {
 		log.Info("shutdown signal received, draining")
 	}()
 
+	// SIGHUP reloads policy without dropping in-flight data (F-11.4). An
+	// invalid file is refused and the running config stays in force.
+	hup := make(chan os.Signal, 1)
+	signal.Notify(hup, syscall.SIGHUP)
+	go func() {
+		for range hup {
+			next, err := config.Load(*path)
+			if err != nil {
+				svc.Metrics().ConfigReloads.WithLabelValues("error").Inc()
+				log.Error("reload rejected, previous config still in force", "error", err)
+				continue
+			}
+			pending, err := svc.Reload(next)
+			if err != nil {
+				log.Error("reload failed", "error", err)
+				continue
+			}
+			if len(pending) > 0 {
+				log.Warn("some changes need a restart to take effect", "sections", pending)
+			}
+		}
+	}()
+
 	runErr := svc.Run(ctx)
 
-	shutCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	shutCtx, cancel := context.WithTimeout(context.Background(), svc.ShutdownTimeout())
 	defer cancel()
 	if err := svc.Shutdown(shutCtx); err != nil {
 		log.Error("shutdown", "error", err)

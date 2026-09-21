@@ -17,6 +17,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -78,7 +79,7 @@ func (r *Receiver) Stats() Stats {
 func (r *Receiver) Start(ctx context.Context, next pipeline.Next) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/episodes", r.auth(r.handleEpisodes(next)))
-	mux.HandleFunc("/v1/spans", r.auth(r.handleEpisodes(next)))
+	mux.HandleFunc("/v1/spans", r.auth(r.handleSpans(next)))
 
 	// §9.4: reserved. It exists so a design partner can prove a join by
 	// hand without the collector growing a CDC subsystem, but v1 writes no
@@ -161,15 +162,18 @@ func (r *Receiver) handleEpisodes(next pipeline.Next) http.HandlerFunc {
 			return
 		}
 
-		body, err := io.ReadAll(http.MaxBytesReader(w, req.Body, r.opts.MaxRequestBytes))
-		if err != nil {
-			r.rejected.Add(1)
-			http.Error(w, "request body too large or unreadable", http.StatusRequestEntityTooLarge)
+		body, ok := r.readBody(w, req)
+		if !ok {
 			return
 		}
-		r.bytes.Add(int64(len(body)))
 
-		eps, err := wire.DecodeEpisodes(body)
+		var eps []wire.Episode
+		var err error
+		if isProtobuf(req) {
+			eps, err = wire.DecodeEpisodesProto(body)
+		} else {
+			eps, err = wire.DecodeEpisodes(body)
+		}
 		if err != nil {
 			r.rejected.Add(1)
 			// §9.1 requires a field path on a schema error. The decoder's
@@ -192,9 +196,7 @@ func (r *Receiver) handleEpisodes(next pipeline.Next) http.HandlerFunc {
 					// The pipeline declined it. Tell the
 					// producer to retry rather than
 					// acknowledging data never accepted.
-					w.Header().Set("Retry-After", "1")
-					writeJSONError(w, http.StatusServiceUnavailable,
-						"collector cannot accept data")
+					r.refuse(w, err)
 					return
 				}
 				steps++
@@ -207,3 +209,102 @@ func (r *Receiver) handleEpisodes(next pipeline.Next) http.HandlerFunc {
 		writeJSON(w, http.StatusAccepted, response{Accepted: len(eps), Steps: steps})
 	}
 }
+
+// handleSpans serves partial emit (§9.2): observations the collector
+// assembles into episodes, as opposed to whole episodes the producer already
+// assembled. Same status codes as /v1/episodes.
+func (r *Receiver) handleSpans(next pipeline.Next) http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
+		if req.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if req.ContentLength > r.opts.MaxRequestBytes {
+			r.rejected.Add(1)
+			http.Error(w, fmt.Sprintf("request body exceeds max_request_bytes (%d)",
+				r.opts.MaxRequestBytes), http.StatusRequestEntityTooLarge)
+			return
+		}
+
+		body, ok := r.readBody(w, req)
+		if !ok {
+			return
+		}
+
+		var spans []wire.SpanRecord
+		var err error
+		if isProtobuf(req) {
+			spans, err = wire.DecodeSpansProto(body)
+		} else {
+			spans, err = wire.DecodeSpans(body)
+		}
+		if err != nil {
+			r.rejected.Add(1)
+			writeJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		// Validate the whole batch before accepting any of it, so a
+		// producer never gets a 400 for a batch that was half ingested
+		// and cannot tell which half to resend.
+		envs := make([]pipeline.Envelope, 0, len(spans))
+		for i, sp := range spans {
+			env, err := sp.ToEnvelope(r.opts.Name)
+			if err != nil {
+				r.rejected.Add(1)
+				writeJSONError(w, http.StatusBadRequest, fmt.Sprintf("spans[%d]: %v", i, err))
+				return
+			}
+			envs = append(envs, env)
+		}
+
+		for _, env := range envs {
+			if err := next(req.Context(), env); err != nil {
+				r.refuse(w, err)
+				return
+			}
+		}
+
+		r.accepted.Add(1)
+		writeJSON(w, http.StatusAccepted, response{Steps: len(envs)})
+	}
+}
+
+// readBody reads a bounded request body (F-1.7).
+func (r *Receiver) readBody(w http.ResponseWriter, req *http.Request) ([]byte, bool) {
+	body, err := io.ReadAll(http.MaxBytesReader(w, req.Body, r.opts.MaxRequestBytes))
+	if err != nil {
+		r.rejected.Add(1)
+		http.Error(w, "request body too large or unreadable", http.StatusRequestEntityTooLarge)
+		return nil, false
+	}
+	r.bytes.Add(int64(len(body)))
+	return body, true
+}
+
+// refuse maps a pipeline refusal onto the §9.1 status codes: 429 for a quota,
+// 503 with Retry-After for backpressure. Both tell the producer to retry
+// rather than treat the data as delivered.
+func (r *Receiver) refuse(w http.ResponseWriter, err error) {
+	w.Header().Set("Retry-After", "1")
+	if pipeline.IsQuotaExceeded(err) {
+		writeJSONError(w, http.StatusTooManyRequests, "quota exceeded for this source")
+		return
+	}
+	writeJSONError(w, http.StatusServiceUnavailable, "collector cannot accept data")
+}
+
+// isProtobuf reports whether the request body is protobuf (F-1.2). JSON is
+// the default so a curl with no content type does the obvious thing.
+func isProtobuf(req *http.Request) bool {
+	ct := req.Header.Get("Content-Type")
+	return strings.HasPrefix(ct, "application/x-protobuf") ||
+		strings.HasPrefix(ct, "application/protobuf")
+}
+
+// BytesReceived reports cumulative request bytes (cc_ingest_bytes_total).
+func (r *Receiver) BytesReceived() int64 { return r.bytes.Load() }
+
+// Rejected reports cumulative refused requests — oversized, malformed or
+// unauthorised — for cc_ingest_records_total{result="rejected"} (F-1.7).
+func (r *Receiver) Rejected() int64 { return r.rejected.Load() }

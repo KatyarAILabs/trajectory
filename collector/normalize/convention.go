@@ -44,6 +44,7 @@ const (
 	FTokenOutput      = "token_output"
 	FTokenCached      = "token_cached"
 	FTokenReasoning   = "token_reasoning"
+	FCost             = "cost"
 )
 
 // knownFields is every canonical field the mapper understands. A mapping file
@@ -58,6 +59,7 @@ var knownFields = map[string]bool{
 	FInvocationParams: true,
 	FTemperature:      true, FTopP: true, FMaxTokens: true, FSeed: true, FStopSequences: true,
 	FTokenInput: true, FTokenOutput: true, FTokenCached: true, FTokenReasoning: true,
+	FCost: true,
 }
 
 // KindMapping maps a producer's span-kind vocabulary onto canonical kinds.

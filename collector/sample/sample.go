@@ -39,6 +39,9 @@ const (
 // Sampler makes head and tail decisions.
 type Sampler struct {
 	headRate float64
+	// bySource overrides the head rate for particular sources (F-7.1). A
+	// noisy source can be sampled down without touching the rest.
+	bySource map[string]float64
 
 	keepIf    []compiledRule
 	otherwise float64
@@ -69,6 +72,7 @@ func New(cfg config.Sampling) (*Sampler, error) {
 	s := &Sampler{
 		headRate:  1.0,
 		otherwise: 1.0,
+		bySource:  map[string]float64{},
 		stats:     Stats{TailKept: map[string]int64{}},
 	}
 	if cfg.Head.Rate != nil {
@@ -123,6 +127,21 @@ func celEnv() (*cel.Env, error) {
 	)
 }
 
+// SetSourceRate overrides the head rate for one source (F-7.1).
+func (s *Sampler) SetSourceRate(source string, rate float64) { s.bySource[source] = rate }
+
+// HeadKeepFrom decides for a session from a particular source, applying that
+// source's rate when it has one and the global rate otherwise.
+//
+// The hash is still of the session key alone, so a session gets one answer no
+// matter which replica sees it — the property that stops episodes splitting.
+func (s *Sampler) HeadKeepFrom(source, sessionKey string) bool {
+	if rate, ok := s.bySource[source]; ok {
+		return s.decide(rate, sessionKey)
+	}
+	return s.HeadKeep(sessionKey)
+}
+
 // HeadKeep decides whether to admit a session, before assembly (F-7.1).
 //
 // The decision is a deterministic hash of the session key rather than a random
@@ -131,20 +150,24 @@ func celEnv() (*cel.Env, error) {
 // spans and reject others, producing exactly the split episodes this package
 // exists to prevent.
 func (s *Sampler) HeadKeep(sessionKey string) bool {
-	if s.headRate >= 1.0 {
+	return s.decide(s.headRate, sessionKey)
+}
+
+func (s *Sampler) decide(rate float64, sessionKey string) bool {
+	if rate >= 1.0 {
 		s.mu.Lock()
 		s.stats.HeadKept++
 		s.mu.Unlock()
 		return true
 	}
-	if s.headRate <= 0 {
+	if rate <= 0 {
 		s.mu.Lock()
 		s.stats.HeadDropped++
 		s.mu.Unlock()
 		return false
 	}
 
-	keep := hashUnit(sessionKey) < s.headRate
+	keep := hashUnit(sessionKey) < rate
 
 	s.mu.Lock()
 	if keep {

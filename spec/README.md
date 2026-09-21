@@ -120,3 +120,10 @@ exports drop it — so an episode can carry `has_params: true` and still not
 replay exactly. `cc replay` says so explicitly when it sees params without a
 seed. A consumer filtering for exactly-reproducible episodes should check for a
 seed on the LLM steps, not only the flag.
+
+## Columns added since the spec draft
+
+`steps.cost_usd` (optional double) carries the call's cost when the source
+reports it, satisfying F-4.3, which §7.2 had no column for. It is the last
+column, appended per F-10.1, and a reader built before it existed reads current
+files unmodified — `pkg/record/compat_test.go` checks exactly that.

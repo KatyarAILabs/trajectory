@@ -7,3 +7,7 @@ docs
 promo-video
 *.md
 !README.md
+
+sdk/typescript/node_modules
+sdk/typescript/dist
+**/__pycache__

@@ -405,3 +405,98 @@ load. That needs CI hardware and belongs before M3.
 | External PII detection (F-5.8) | Regex plus allow-list covers structured cases | Free-text PII no regex catches |
 | 24h soak (§15) | A 25s run shows memory is not obviously unbounded | Before claiming M3 |
 | Durable assembly state (F-3.8, Q-8) | Best-effort was the agreed v1 answer; in-flight episodes are bounded and their loss is counted | A deployment where a restart during a burst loses meaningful work |
+
+---
+
+## Appendix D — Closing the MVP
+
+Written after an audit that checked **behaviour**, not references. The earlier
+claim that "all 56 MUSTs are referenced in the codebase" was true and nearly
+worthless: it counted a requirement as covered if its ID appeared in a comment.
+Checking each one against a test that would fail without it found real gaps.
+
+### D.1 What the behavioural audit found
+
+| Requirement | Was | Now |
+|---|---|---|
+| F-1.2 native protobuf | JSON only | Protobuf on `/v1/episodes` and `/v1/spans`, converging on the JSON decoder so the encodings cannot disagree |
+| §9.2 `/v1/spans` | An alias for `/v1/episodes` | Real partial emit, assembled by session across requests |
+| F-11.2 own traces | Absent | OTLP export, off unless configured; spans carry ids and counts only |
+| F-11.3 dry run | Redaction only | `cc validate -sample`: every decision the pipeline makes, nothing written |
+| F-1.7 "and a metric" | Rejected, never counted | `cc_ingest_records_total{result="rejected"}` |
+| §11 metrics | Several registered, never incremented | Wired; a dashboard reading zero redaction errors was false reassurance |
+| F-3.8 loss metric | Absent | `cc_assembly_lost_on_restart_total`, from a marker the next process reads |
+| F-7.1 "per source" | Global only | `sources[].head_sample_rate` |
+| F-4.3 cost | Captured nowhere | `cost_usd` column, appended per F-10.1 |
+| F-11.5 "configurable deadline" | Hard-coded 30s | `shutdown_timeout` |
+| F-9.1 S3 | Compiled, never run | Tested against MinIO, in CI |
+| F-13.3 OTel exporter | No factory; the shipped builder config could not build | A working component, and a distribution built and run in CI |
+
+### D.2 Bugs the new tests found
+
+**The producer's episode_id was discarded.** §9.1 says the native endpoint is
+idempotent on episode_id. The collector replaced every id with its own ULID, so
+a producer could not find its own episode, and retrying after a lost
+acknowledgement duplicated every step as a patch. Fixed by honouring the
+supplied id and remembering emitted span ids, so a redelivery is recognised as a
+duplicate rather than a late arrival.
+
+**A configurable deadline broke shutdown for anyone not using `Load`.** Making
+`shutdown_timeout` configurable left its zero value meaning "an already-expired
+context". Embedding hosts and tests build config in code, never pass through
+`Load`'s defaults, and silently lost their final flush. Caught by the
+idempotency test within minutes of being introduced; the default is now enforced
+where the value is used.
+
+**Missing timestamps landed in 1970.** A span with no `started_at` produced an
+episode in a `dt=1970-01-01` partition that would fail the conformance suite's
+own timestamp check. Real producers omit fields. It now defaults to receive
+time.
+
+**Two shipped config files were broken.** The Helicone mapping used JSONPath
+dot-notation on hyphenated keys, which does not parse; the builder manifest's
+replace paths were off by one directory. Both had been written, reviewed and
+committed, and neither had ever been loaded. Each now has a test that loads it.
+
+**The Helm chart could not terminate a pod cleanly.** Its preStop hook ran
+`/bin/sh -c sleep 5` in a distroless image with no shell. Found by actually
+running the image; the chart now uses the native sleep action and requires
+Kubernetes 1.30.
+
+**Two data races**, one real (a config read racing hot reload) and one in a test
+harness. Found by the race detector; neither showed up in ordinary runs.
+
+### D.3 What was verified for real, not in a unit test
+
+| Artifact | How |
+|---|---|
+| Container image | Built; 12.5 MB; uid 65532; no shell; ran under `--read-only --cap-drop ALL` and ingested traffic |
+| Helm chart | Installed on Kubernetes 1.34 (kind); init validation passed; traffic ingested; pod deleted and rescheduled; 16/16 conformance on data that survived on the volume |
+| OTel distribution | Built from the manifest; exporter registered; OTLP in, conforming lake out |
+| S3 sink | Against MinIO: objects listed and downloaded, Parquet parsed, manifest cross-checked, no leak |
+| Python and TypeScript SDKs | Against the running collector: all three fidelity flags true — the only ingest path that achieves that |
+
+### D.4 Spec changes this work implies
+
+The spec should be amended in four places. None is urgent, but each is currently
+collector behaviour the requirements do not describe:
+
+1. **F-3.3**: emit after a settle period following the terminal marker, not on
+   it (appendix A.1).
+2. **§7.2**: `content_inline` is a JSON envelope (A.4), and there is a
+   `cost_usd` column (D.1).
+3. **§10**: tail-rule indexing of `raw` is lenient; `in` is the presence test
+   (B.2).
+4. **§9.2**: `/v1/spans` accepts an optional `episode_id`, which becomes the
+   stored id.
+
+### D.5 What is genuinely not done
+
+| | Why it is acceptable for an MVP |
+|---|---|
+| Kafka source (F-1.5), logprobs (F-4.5), secondary sinks (F-9.9) | All MAY |
+| Iceberg (F-9.8) | Deferred to v1.1 by Q-3; the manifest carries what a catalog needs |
+| Durable assembly state | Best-effort by Q-8; loss is bounded and now counted |
+| 24-hour soak at 2× load (§15) | Needs CI hardware; only 25 seconds has been run |
+| A week unattended at a design partner (M3) | Needs a design partner |
+| Publishing | Nothing is on PyPI, npm or a registry; the module path is a placeholder |

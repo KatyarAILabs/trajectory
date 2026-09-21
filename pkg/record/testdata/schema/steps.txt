@@ -54,4 +54,5 @@ message Step {
 			required binary value (STRING);
 		}
 	}
+	optional double cost_usd;
 }

@@ -19,6 +19,9 @@ func (a *Assembler) closeLocked(f *inFlight, status string) *pipeline.Assembled 
 		delete(a.open, f.key)
 	}
 	a.rememberEmitted(f.key, f.episodeID)
+	for id := range f.spans {
+		a.markEmittedSpan(f.key, id)
+	}
 
 	steps := f.orderedSteps()
 

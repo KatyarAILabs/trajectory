@@ -677,3 +677,83 @@ func TestCorruptionInAnEarlierSegmentIsIsolated(t *testing.T) {
 			"discard the others", got)
 	}
 }
+
+var testBufKey = []byte("0123456789abcdef0123456789abcdef") // 32 bytes
+
+// F-8.6: with a key configured, nothing on disk is readable as plaintext.
+func TestEncryptedAtRest(t *testing.T) {
+	dir := t.TempDir()
+	b := open(t, dir, func(o *Options) { o.EncryptionKey = testBufKey })
+	b.Append([]byte(`{"prompt":"a distinctive secret phrase"}`))
+	b.Close()
+
+	segs, _ := filepath.Glob(filepath.Join(dir, "*.seg"))
+	for _, s := range segs {
+		data, _ := os.ReadFile(s)
+		if strings.Contains(string(data), "distinctive secret phrase") {
+			t.Fatalf("plaintext found in %s despite encryption", filepath.Base(s))
+		}
+	}
+
+	b2 := open(t, dir, func(o *Options) { o.EncryptionKey = testBufKey })
+	defer b2.Close()
+	e, err := b2.Next()
+	if err != nil || e == nil {
+		t.Fatalf("could not read back: %v", err)
+	}
+	if !strings.Contains(string(e.Payload), "distinctive secret phrase") {
+		t.Errorf("decrypted payload wrong: %q", e.Payload)
+	}
+}
+
+// Changing the key with undelivered data would make every record unreadable,
+// and an unreadable record is discarded. Refuse instead.
+func TestKeyChangeWithPendingDataRefused(t *testing.T) {
+	dir := t.TempDir()
+	b := open(t, dir, func(o *Options) { o.EncryptionKey = testBufKey })
+	b.Append([]byte("pending"))
+	b.Close()
+
+	other := []byte("ffffffffffffffffffffffffffffffff")
+	_, err := Open(Options{Dir: dir, MaxBytes: 1 << 20, SegmentBytes: 4096,
+		MaxAge: time.Hour, EncryptionKey: other})
+	if err == nil {
+		t.Fatal("opened with a different key while undelivered records remain; they would be discarded")
+	}
+	if !strings.Contains(err.Error(), "drain") {
+		t.Errorf("error does not say how to recover: %v", err)
+	}
+
+	// Turning encryption off is the same hazard.
+	if _, err := Open(Options{Dir: dir, MaxBytes: 1 << 20, SegmentBytes: 4096, MaxAge: time.Hour}); err == nil {
+		t.Fatal("opened without encryption over an encrypted buffer with pending data")
+	}
+}
+
+// Once drained, the key can change freely.
+func TestKeyChangeAfterDrainAllowed(t *testing.T) {
+	dir := t.TempDir()
+	b := open(t, dir, func(o *Options) { o.EncryptionKey = testBufKey })
+	b.Append([]byte("x"))
+	e, _ := b.Next()
+	b.Ack(e)
+	b.Close()
+
+	other := []byte("ffffffffffffffffffffffffffffffff")
+	b2, err := Open(Options{Dir: dir, MaxBytes: 1 << 20, SegmentBytes: 4096,
+		MaxAge: time.Hour, EncryptionKey: other})
+	if err != nil {
+		t.Fatalf("drained buffer refused a new key: %v", err)
+	}
+	b2.Close()
+}
+
+func TestHexKeyAccepted(t *testing.T) {
+	hexKey := []byte(strings.Repeat("ab", 32))
+	if _, err := NewAEAD(hexKey); err != nil {
+		t.Errorf("64-char hex key rejected: %v", err)
+	}
+	if _, err := NewAEAD([]byte("short")); err == nil {
+		t.Error("a short key was accepted")
+	}
+}

@@ -99,6 +99,7 @@ func (a *Assembler) rememberEmitted(sessionKey, episodeID string) {
 		if id, ok := a.emitted[oldest]; ok {
 			delete(a.emitted, oldest)
 			delete(a.patchIdx, id)
+			delete(a.emittedSpans, oldest)
 		}
 	}
 }

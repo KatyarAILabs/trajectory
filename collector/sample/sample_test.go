@@ -259,3 +259,27 @@ func TestInOperatorStillDistinguishesPresence(t *testing.T) {
 		t.Error("`in` missed a key that is present with an empty value")
 	}
 }
+
+// F-7.1: head sampling per source. A noisy source is sampled down while the
+// others are untouched, and each session still gets exactly one answer.
+func TestPerSourceHeadRate(t *testing.T) {
+	s, _ := New(policy(rate(1.0), nil, nil))
+	s.SetSourceRate("noisy", 0.1)
+
+	kept := 0
+	for i := 0; i < 5000; i++ {
+		key := fmt.Sprintf("sess-%d", i)
+		if !s.HeadKeepFrom("quiet", key) {
+			t.Fatal("a source with no override was sampled")
+		}
+		if s.HeadKeepFrom("noisy", key) {
+			kept++
+		}
+		if s.HeadKeepFrom("noisy", key) != s.HeadKeepFrom("noisy", key) {
+			t.Fatal("one session got two different decisions")
+		}
+	}
+	if got := float64(kept) / 5000; math.Abs(got-0.1) > 0.02 {
+		t.Errorf("noisy source kept %.3f, want about 0.10", got)
+	}
+}

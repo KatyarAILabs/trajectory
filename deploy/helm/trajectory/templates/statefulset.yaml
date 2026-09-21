@@ -91,13 +91,17 @@ spec:
             initialDelaySeconds: 2
             periodSeconds: 5
 
-          # Long enough to stop accepting, drain assembly and flush the buffer
-          # (F-11.5). Too short and a rolling update discards in-flight
-          # episodes on every pod.
+          # A short pause before SIGTERM, so endpoints are removed from the
+          # Service before the collector stops accepting — otherwise producers
+          # see refused connections during every rolling update.
+          #
+          # This uses the native sleep action (Kubernetes 1.30+), not
+          # `exec: sh -c sleep`. The image is distroless and has no shell,
+          # so an exec hook would fail on every pod termination.
           lifecycle:
             preStop:
-              exec:
-                command: ["/bin/sh", "-c", "sleep 5"]
+              sleep:
+                seconds: 5
 
           resources: {{- toYaml .Values.resources | nindent 12 }}
 

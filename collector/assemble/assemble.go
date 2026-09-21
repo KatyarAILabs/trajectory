@@ -80,6 +80,10 @@ type Assembler struct {
 	emitted     map[string]string
 	emittedFIFO []string
 	patchIdx    map[string]int32
+	// emittedSpans remembers which span ids each emitted session already
+	// carried, so a redelivery is recognised as a duplicate. Bounded with
+	// emitted, by PatchMemory.
+	emittedSpans map[string]map[string]bool
 
 	stats Stats
 }
@@ -167,6 +171,16 @@ func (a *Assembler) Add(env pipeline.Envelope) {
 		// span as an append-only patch rather than mutating the emitted
 		// episode (F-3.5) or starting a bogus new one from a fragment.
 		if epID, closed := a.emitted[env.SessionKey]; closed {
+			// A redelivery of a span that was already emitted is a
+			// duplicate, not a late arrival. Patching it in again would
+			// duplicate the step, which is what makes a producer's retry
+			// after a lost acknowledgement unsafe (§9.1, F-8.4).
+			if a.emittedSpans[env.SessionKey][spanKey(env)] {
+				a.stats.Duplicates++
+				a.mu.Unlock()
+				return
+			}
+			a.markEmittedSpan(env.SessionKey, spanKey(env))
 			patch := a.patchFor(epID, env)
 			a.stats.LateSpans++
 			a.stats.Patched++
@@ -184,9 +198,13 @@ func (a *Assembler) Add(env pipeline.Envelope) {
 				a.stats.Evicted++
 			}
 		}
+		id := env.EpisodeID
+		if id == "" {
+			id = a.opts.NewID()
+		}
 		ep := &inFlight{
 			key:       env.SessionKey,
-			episodeID: a.opts.NewID(),
+			episodeID: id,
 			createdAt: a.opts.Now(),
 			spans:     map[string]pipeline.Envelope{},
 			source:    env.Source,
@@ -363,4 +381,25 @@ func syntheticSpanID(env pipeline.Envelope) string {
 		h.Write([]byte(*env.Step.ToolName))
 	}
 	return "syn-" + hex.EncodeToString(h.Sum(nil)[:12])
+}
+
+// spanKey is the identity used for deduplication: the producer's span id, or
+// a content hash when it sent none.
+func spanKey(env pipeline.Envelope) string {
+	if env.SpanID != "" {
+		return env.SpanID
+	}
+	return syntheticSpanID(env)
+}
+
+func (a *Assembler) markEmittedSpan(session, span string) {
+	if a.emittedSpans == nil {
+		a.emittedSpans = map[string]map[string]bool{}
+	}
+	set := a.emittedSpans[session]
+	if set == nil {
+		set = map[string]bool{}
+		a.emittedSpans[session] = set
+	}
+	set[span] = true
 }

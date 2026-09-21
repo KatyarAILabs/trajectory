@@ -14,3 +14,10 @@
 .DS_Store
 .idea/
 .vscode/
+
+# SDK and distribution build output
+sdk/typescript/node_modules/
+sdk/typescript/dist/
+__pycache__/
+*.pyc
+otelcol/dist/

@@ -86,6 +86,11 @@ config:
   schema_version: "0.1.0"
   tenant: CHANGEME
 
+  # Graceful-shutdown deadline (F-11.5). Must be shorter than the pod's
+  # terminationGracePeriodSeconds (60) minus the preStop sleep (5), or the
+  # kubelet kills the process mid-flush.
+  shutdown_timeout: 45s
+
   sources:
     - name: otlp
       type: otlp

@@ -1,78 +1,61 @@
 // Copyright The Trajectory Authors.
 // SPDX-License-Identifier: Apache-2.0
 
-// Package trajectoryexporter exports OTLP traces through the trajectory
-// pipeline (F-13.3).
-//
-// It reuses collector/* directly rather than reimplementing normalisation,
-// redaction or storage. A second implementation would drift from the standalone
-// binary, and the fidelity and redaction guarantees are the entire product —
-// two subtly different redaction paths is exactly the bug nobody finds until a
-// payload turns up in a lake.
 package trajectoryexporter
 
 import (
 	"fmt"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/trajectory-project/trajectory/collector/config"
+	"github.com/trajectory-project/trajectory/internal/version"
 )
 
-// Config is the exporter's configuration.
+// Config holds the exporter's settings in exactly the format `cc` takes.
 //
-// It is the collector's own config minus `sources`, because in this deployment
-// the host OTel Collector owns the receivers. Everything else is shared, and
-// validated by the same code, so a policy that passes `cc validate` means the
-// same thing here.
+// It is deliberately not a parallel set of mapstructure-tagged structs. A
+// second schema for the same settings would drift, and the settings in
+// question include the redaction policy — the one thing that must mean exactly
+// the same in both deployments. The OTel Collector hands us a map; it is
+// rendered to YAML and put through the same strict parser and validator as the
+// standalone binary, including rejecting unknown keys.
 type Config struct {
-	Tenant string `mapstructure:"tenant"`
-
-	Assembly  config.Assembly  `mapstructure:"assembly"`
-	Redaction config.Redaction `mapstructure:"redaction"`
-	Entities  []config.Entity  `mapstructure:"entities"`
-	Sampling  config.Sampling  `mapstructure:"sampling"`
-	Buffer    config.Buffer    `mapstructure:"buffer"`
-	Sinks     []config.Sink    `mapstructure:"sinks"`
-
-	// SessionKey is the attribute precedence for grouping spans into
-	// episodes (F-3.1).
-	SessionKey []string `mapstructure:"session_key"`
+	Settings map[string]any `mapstructure:",remain"`
 }
 
-// Validate implements component.Config.
+// Validate implements the OTel Collector's config validation hook.
 func (c *Config) Validate() error {
-	if c.Tenant == "" {
-		return fmt.Errorf("tenant is required; it is recorded on every record and is a partition key")
-	}
-	if len(c.Sinks) == 0 {
-		return fmt.Errorf("at least one sink is required")
-	}
-	if c.Buffer.Dir == "" {
-		return fmt.Errorf(
-			"buffer.dir is required; without a disk buffer no acknowledged data survives " +
-				"a sink outage or a restart")
-	}
-
-	// Reuse the standalone validator so the rules cannot diverge. It works
-	// on a whole Config, so the exporter's fields are lifted into one.
-	full := &config.Config{
-		SchemaVersion: schemaVersionForValidation(),
-		Tenant:        c.Tenant,
-		Assembly:      c.Assembly,
-		Redaction:     c.Redaction,
-		Entities:      c.Entities,
-		Sampling:      c.Sampling,
-		Buffer:        c.Buffer,
-		Sinks:         c.Sinks,
-		// A synthetic source satisfies the "at least one source"
-		// requirement, which does not apply when the host collector
-		// owns the receivers.
-		Sources: []config.Source{syntheticSource()},
-	}
-	return full.Validate("exporter/trajectory")
+	_, err := c.parse()
+	return err
 }
 
-func syntheticSource() config.Source {
-	s := config.Source{Name: "otelcol", Type: "otlp"}
-	s.HTTP.Listen = "127.0.0.1:0"
-	return s
+// parse renders the settings and runs the shared parser.
+//
+// `sources` is filled in because the host collector owns the receivers; a
+// `sources` key supplied here is an error rather than something silently
+// ignored.
+func (c *Config) parse() (*config.Config, error) {
+	settings := map[string]any{}
+	for k, v := range c.Settings {
+		settings[k] = v
+	}
+
+	if _, ok := settings["sources"]; ok {
+		return nil, fmt.Errorf("trajectory exporter: `sources` is not allowed here; " +
+			"the OpenTelemetry Collector's receivers feed this exporter")
+	}
+	if _, ok := settings["schema_version"]; !ok {
+		settings["schema_version"] = version.Schema
+	}
+	settings["sources"] = []any{map[string]any{
+		"name": "otelcol", "type": "otlp",
+		"http": map[string]any{"listen": "127.0.0.1:0"},
+	}}
+
+	raw, err := yaml.Marshal(settings)
+	if err != nil {
+		return nil, fmt.Errorf("trajectory exporter: %w", err)
+	}
+	return config.Parse(raw, "exporters::trajectory")
 }

@@ -22,6 +22,7 @@
 package buffer
 
 import (
+	"crypto/cipher"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -63,6 +64,9 @@ type Options struct {
 	// loss is observable rather than silent (F-8.5).
 	OnEvict func(reason string, n int, bytes int64)
 
+	// EncryptionKey, when set, encrypts every record at rest (F-8.6).
+	EncryptionKey []byte
+
 	Now func() time.Time
 }
 
@@ -80,6 +84,7 @@ type Buffer struct {
 	totalBytes int64
 	closed     bool
 	lock       *lockFile
+	aead       cipher.AEAD
 }
 
 type segment struct {
@@ -139,7 +144,23 @@ func Open(opts Options) (*Buffer, error) {
 	}
 
 	b := &Buffer{opts: opts, lock: lock}
+
+	fingerprint := "none"
+	if len(opts.EncryptionKey) > 0 {
+		aead, err := NewAEAD(opts.EncryptionKey)
+		if err != nil {
+			lock.release()
+			return nil, err
+		}
+		b.aead = aead
+		fingerprint = Fingerprint(opts.EncryptionKey)
+	}
+
 	if err := b.recover(); err != nil {
+		lock.release()
+		return nil, err
+	}
+	if err := checkKey(opts.Dir, fingerprint, b.PendingBytes() > 0); err != nil {
 		lock.release()
 		return nil, err
 	}

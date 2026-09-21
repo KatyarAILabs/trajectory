@@ -20,7 +20,7 @@ import (
 
 // Exporter runs the trajectory pipeline inside an OTel Collector.
 type Exporter struct {
-	cfg *Config
+	cfg *config.Config
 	svc *service.Service
 	reg *normalize.Registry
 	log *slog.Logger
@@ -32,7 +32,7 @@ type Exporter struct {
 }
 
 // NewExporter builds an exporter from validated config.
-func NewExporter(cfg *Config, log *slog.Logger) (*Exporter, error) {
+func NewExporter(cfg *config.Config, log *slog.Logger) (*Exporter, error) {
 	if log == nil {
 		log = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	}
@@ -42,19 +42,7 @@ func NewExporter(cfg *Config, log *slog.Logger) (*Exporter, error) {
 		return nil, fmt.Errorf("trajectoryexporter: load conventions: %w", err)
 	}
 
-	full := &config.Config{
-		SchemaVersion: schemaVersionForValidation(),
-		Tenant:        cfg.Tenant,
-		Assembly:      cfg.Assembly,
-		Redaction:     cfg.Redaction,
-		Entities:      cfg.Entities,
-		Sampling:      cfg.Sampling,
-		Buffer:        cfg.Buffer,
-		Sinks:         cfg.Sinks,
-		Sources:       []config.Source{syntheticSource()},
-	}
-
-	svc, err := service.NewEmbedded(full, log)
+	svc, err := service.NewEmbedded(cfg, log)
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +103,7 @@ func (e *Exporter) Shutdown(ctx context.Context) error {
 // uses, so an episode produced here is byte-identical to one produced there
 // from the same spans.
 func (e *Exporter) ConsumeTraces(ctx context.Context, td ptrace.Traces) error {
-	order := e.cfg.SessionKey
+	order := e.cfg.Assembly.SessionKey
 	if len(order) == 0 {
 		order = []string{"session.id", "gen_ai.conversation.id", "trace_id"}
 	}

@@ -4,10 +4,12 @@
 package webhook
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/trajectory-project/trajectory/collector/pipeline"
 	"github.com/trajectory-project/trajectory/pkg/record"
 )
 
@@ -39,70 +41,100 @@ func litellm(t *testing.T) *Receiver {
 	return New(Options{Name: "litellm", Mapping: m})
 }
 
-// A representative LiteLLM success callback maps onto the canonical step.
-func TestLiteLLMCallback(t *testing.T) {
-	r := litellm(t)
-
-	body := `{
-	  "litellm_call_id": "call-1",
-	  "model": "claude-opus-5",
-	  "messages": [{"role":"user","content":"refund order 77"}],
-	  "response": {
-	    "model": "claude-opus-5",
-	    "choices": [{"finish_reason":"stop","message":{"content":"done"}}],
-	    "usage": {"prompt_tokens": 120, "completion_tokens": 8}
-	  },
-	  "optional_params": {"temperature": 0.2, "seed": 11},
-	  "litellm_params": {"custom_llm_provider":"anthropic",
-	                     "metadata":{"session_id":"sess-9","task_type":"refund"}},
-	  "start_time": 1758362400.0,
-	  "end_time": 1758362401.5,
-	  "cache_hit": false
-	}`
-
-	envs, err := r.Map([]byte(body))
+// realLiteLLM loads payloads captured from a running LiteLLM 1.102.0 proxy.
+// The mapping is tested against what LiteLLM actually sends, because the first
+// version of it was written from memory and was wrong about the session, every
+// sampling parameter and both timestamps.
+func realLiteLLM(t *testing.T) []byte {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("..", "..", "..", "spec", "testdata", "litellm-standard-logging-payload.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(envs) != 1 {
-		t.Fatalf("got %d envelopes", len(envs))
-	}
-	e := envs[0]
+	return b
+}
 
-	if e.SessionKey != "sess-9" || e.SpanID != "call-1" {
-		t.Errorf("session=%q span=%q", e.SessionKey, e.SpanID)
+func TestRealLiteLLMPayload(t *testing.T) {
+	r := litellm(t)
+	envs, err := r.Map(realLiteLLM(t))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if e.Step.Kind != record.KindLLM {
-		t.Errorf("kind = %q", e.Step.Kind)
+
+	var llm, tool, failed []pipeline.Envelope
+	for _, e := range envs {
+		switch {
+		case e.Step.Kind == record.KindTool:
+			tool = append(tool, e)
+		case e.Error != nil:
+			failed = append(failed, e)
+		default:
+			llm = append(llm, e)
+		}
 	}
-	if e.Step.Model == nil || *e.Step.Model != "claude-opus-5" {
-		t.Errorf("model = %v", e.Step.Model)
+	if len(llm) != 2 || len(failed) != 1 {
+		t.Fatalf("got %d llm, %d failed, %d tool envelopes; want 2, 1, and at least 1",
+			len(llm), len(failed), len(tool))
 	}
-	if e.Step.Params == nil || e.Step.Params.Seed == nil || *e.Step.Params.Seed != 11 {
-		t.Errorf("seed not captured: %+v", e.Step.Params)
+
+	first := llm[0]
+	// Session: from litellm_session_id, which LiteLLM reports as trace_id.
+	if first.SessionKey != "sess-fixture-1" {
+		t.Errorf("session = %q; calls of one agent run would not group", first.SessionKey)
 	}
-	if e.Step.TokenCounts == nil || *e.Step.TokenCounts.Input != 120 {
-		t.Errorf("tokens = %+v", e.Step.TokenCounts)
+	// Sampling parameters live under model_parameters.
+	p := first.Step.Params
+	if p == nil || p.Seed == nil || *p.Seed != 7 || p.Temperature == nil || *p.Temperature != 0.2 {
+		t.Errorf("params = %+v; want seed 7 and temperature 0.2", p)
 	}
-	if e.Step.FinishReason == nil || *e.Step.FinishReason != "stop" {
-		t.Errorf("finish_reason = %v", e.Step.FinishReason)
+	if first.Step.StartedAt < 1_700_000_000_000_000 {
+		t.Errorf("started_at = %d; startTime was not read", first.Step.StartedAt)
 	}
-	// Epoch seconds, recognised by magnitude and converted to micros.
-	if e.Step.StartedAt != 1758362400_000000 {
-		t.Errorf("started_at = %d", e.Step.StartedAt)
+	if first.Step.LatencyMs == nil {
+		t.Error("latency not derived from startTime/endTime")
 	}
-	if e.Step.LatencyMs == nil || *e.Step.LatencyMs != 1500 {
-		t.Errorf("latency = %v", e.Step.LatencyMs)
+	if first.Step.Provider == nil || *first.Step.Provider != "openai" {
+		t.Errorf("provider = %v", first.Step.Provider)
 	}
-	if e.Meta.TaskType != "refund" {
-		t.Errorf("task_type = %q", e.Meta.TaskType)
+	if first.Step.CostUSD == nil || *first.Step.CostUSD <= 0 {
+		t.Errorf("cost = %v", first.Step.CostUSD)
 	}
-	if !strings.Contains(*e.Step.ContentInline, "refund order 77") {
-		t.Errorf("payload lost the prompt: %s", *e.Step.ContentInline)
+	if first.Step.TokenCounts == nil || *first.Step.TokenCounts.Input != 10 {
+		t.Errorf("tokens = %+v", first.Step.TokenCounts)
 	}
-	// §9.3: unmapped scalar fields land in raw.
-	if e.Step.Raw["cache_hit"] != "false" {
-		t.Errorf("unmapped field not in raw: %v", e.Step.Raw)
+	if first.Meta.TaskType != "refund" {
+		t.Errorf("task_type = %q", first.Meta.TaskType)
+	}
+
+	// The caller's IP address and user agent identify a person, not a
+	// trajectory, and are excluded from raw.
+	for _, k := range []string{"requester_ip_address", "user_agent"} {
+		if _, kept := first.Step.Raw[k]; kept {
+			t.Errorf("%s was kept in raw", k)
+		}
+	}
+
+	// A failed call is a failure, not a success with empty output.
+	if !strings.Contains(failed[0].Error.Message, "Invalid model name") {
+		t.Errorf("error = %q", failed[0].Error.Message)
+	}
+
+	// The tool call is rebuilt from history: args the model asked for, and
+	// the result fed back, addressable as $.args / $.result.
+	if len(tool) != 1 {
+		t.Fatalf("got %d tool steps, want 1", len(tool))
+	}
+	ts := tool[0]
+	if ts.SpanID != "tool:call_abc123" || *ts.Step.ToolName != "zendesk_update_ticket" {
+		t.Errorf("tool step = %s %v", ts.SpanID, ts.Step.ToolName)
+	}
+	for _, want := range []string{`"args":{"id":"TKT-77"`, `"result":{"ok":true`} {
+		if !strings.Contains(*ts.Step.ContentInline, want) {
+			t.Errorf("tool payload missing %s: %s", want, *ts.Step.ContentInline)
+		}
+	}
+	if ts.Step.ToolVersion != nil {
+		t.Error("a tool version was invented; the gateway never sees one")
 	}
 }
 

@@ -309,17 +309,21 @@ func TestGatewayWebhookEndToEnd(t *testing.T) {
 		Mapping: filepath.Join("..", "..", "mappings", "litellm.yaml")}
 	src.HTTP.Listen = "127.0.0.1:44338"
 	cfg.Sources = []config.Source{src}
+	cfg.Entities = []config.Entity{
+		{Tool: "zendesk_update_ticket", Keys: map[string]string{"ticket_id": "$.args.id"}},
+	}
 
 	_, stop := runService(t, cfg)
 	waitForListener(t, "127.0.0.1:44338")
 
-	body := `{"litellm_call_id":"call-1","model":"claude-opus-5",
-	  "messages":[{"role":"user","content":"hello erin@example.com"}],
-	  "response":{"choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2}},
-	  "optional_params":{"seed":9},
-	  "litellm_params":{"metadata":{"session_id":"gw-1"}},
-	  "start_time":1758362400.0,"end_time":1758362401.0}`
-	resp, err := http.Post("http://127.0.0.1:44338/v1/hooks/litellm", "application/json", strings.NewReader(body))
+	// A real batch captured from LiteLLM 1.102.0's generic_api logger: two
+	// calls in one session (one carrying a tool call and its result in its
+	// history) and one failed call in another session.
+	body, err := os.ReadFile(filepath.Join("..", "..", "spec", "testdata", "litellm-standard-logging-payload.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.Post("http://127.0.0.1:44338/v1/hooks/litellm", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -330,17 +334,46 @@ func TestGatewayWebhookEndToEnd(t *testing.T) {
 	stop()
 
 	eps := readTable[record.Episode](t, lake, record.TableEpisodes)
-	if len(eps) != 1 {
-		t.Fatalf("got %d episodes", len(eps))
-	}
-	if eps[0].Instrumentation == nil || *eps[0].Instrumentation != "gateway-litellm" {
-		t.Errorf("instrumentation = %v", eps[0].Instrumentation)
-	}
 	steps := readTable[record.Step](t, lake, record.TableSteps)
-	if steps[0].Params == nil || *steps[0].Params.Seed != 9 {
-		t.Errorf("seed not carried from the gateway payload")
+
+	var ok, failed *record.Episode
+	for i := range eps {
+		if eps[i].Error != nil {
+			failed = &eps[i]
+		} else {
+			ok = &eps[i]
+		}
 	}
-	assertNoLeak(t, lake, "erin@example.com")
+	if len(eps) != 2 || ok == nil || failed == nil {
+		t.Fatalf("got %d episodes; want one from the session and one failed", len(eps))
+	}
+	// Two model calls plus the tool step rebuilt from history.
+	if ok.StepCount != 3 {
+		t.Errorf("session episode has %d steps, want 3 (2 llm + 1 tool)", ok.StepCount)
+	}
+	if ok.Instrumentation == nil || *ok.Instrumentation != "gateway-litellm" {
+		t.Errorf("instrumentation = %v", ok.Instrumentation)
+	}
+	// Entity extraction reaches the tool arguments the gateway reconstructed.
+	var ticket string
+	for _, k := range ok.EntityKeys {
+		if k.Name == "ticket_id" {
+			ticket = k.Value
+		}
+	}
+	if ticket != "TKT-77" {
+		t.Errorf("ticket_id = %q; entity extraction cannot see gateway tool calls", ticket)
+	}
+	seeded := false
+	for _, s := range steps {
+		if s.Params != nil && s.Params.Seed != nil && *s.Params.Seed == 7 {
+			seeded = true
+		}
+	}
+	if !seeded {
+		t.Error("the seed LiteLLM logged did not reach the lake")
+	}
+	assertNoLeak(t, lake, "jane@example.com")
 }
 
 // F-1.4: lines appended to a tailed file become episodes.

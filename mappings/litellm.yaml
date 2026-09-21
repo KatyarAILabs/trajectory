@@ -1,72 +1,105 @@
-# LiteLLM proxy success/failure callback payload.
-# https://docs.litellm.ai/docs/proxy/logging
+# LiteLLM proxy, via its `generic_api` logging callback.
 #
-# UC-1: organisation-wide coverage with no application change. The limitation
-# is stated in the spec and worth repeating here, because it decides whether
-# this path is enough for a given team: a gateway sees LLM calls only. Tool
-# calls made by the application never reach it, so episodes captured this way
-# have the model turns and none of the actions between them.
+# Written against LiteLLM 1.102.0's StandardLoggingPayload, captured from a
+# running proxy (spec/testdata/litellm-standard-logging-payload.json) rather
+# than from documentation. An earlier version of this file was written from
+# memory and missed the session, every sampling parameter and both timestamps.
 #
-# For scoring "did the agent do the right thing", that is usually not enough.
-# For measuring cost, latency and model behaviour across an organisation, it
-# is.
+# Configure LiteLLM:
+#
+#   litellm_settings:
+#     callbacks: ["generic_api"]
+#   environment:
+#     GENERIC_LOGGER_ENDPOINT: http://<collector>:<port>/v1/hooks/litellm
+#     GENERIC_LOGGER_HEADERS: "Authorization=Bearer <token>"
+#
+# and have callers send `litellm_session_id` (or `metadata.session_id`) so the
+# calls of one agent run group into one episode.
+#
+# What a gateway can and cannot see decides whether this path is enough:
+#   - it sees every model call, its parameters (including seed), tokens, cost
+#     and failures;
+#   - it sees tool calls only through the conversation: the model's requested
+#     arguments and the results fed back as `role: tool` messages. These are
+#     rebuilt into tool steps (tool_steps below), so entity extraction works,
+#     but there is no tool version and no tool timing, because the tool ran in
+#     the application, out of the gateway's sight.
 
 name: litellm
-version: "1.0"
+version: "1.102"
 
-# Gateway payloads are JSON bodies rather than span attributes, so paths are
-# JSONPath into the callback body.
 kind: fixed
 fixed_kind: llm
 
+# Rebuild tool steps from OpenAI-format message history.
+tool_steps: openai_messages
+
+# Top-level fields never kept in raw. They identify the caller, not the
+# trajectory, and raw is subject only to the redaction policy.
+exclude:
+  - requester_ip_address
+  - user_agent
+  - end_user
+
 fields:
-  # Identifies one call, so a gateway that retries its own callback does not
-  # produce a duplicate step.
   span_id:
     - "$.litellm_call_id"
     - "$.id"
   session_key:
-    - "$.litellm_params.metadata.session_id"
-    - "$.litellm_params.metadata.trace_id"
-    - "$.litellm_call_id"
-  group_id:
-    - "$.litellm_params.metadata.group_id"
+    - "$.trace_id"
+    - "$.session_id"
+    - "$.metadata.requester_metadata.session_id"
   task_type:
-    - "$.litellm_params.metadata.task_type"
+    - "$.metadata.requester_metadata.task_type"
+  group_id:
+    - "$.metadata.requester_metadata.group_id"
+
+  # LiteLLM cannot know when an agent run ends, so without this an episode
+  # closes only when the assembly window expires, marked timed_out. Send
+  # metadata {"episode_end": true} on the run's final call to close it
+  # promptly and mark it complete.
+  episode_end:
+    - "$.metadata.requester_metadata.episode_end"
 
   input:
     - "$.messages"
   output:
     - "$.response.choices"
 
+  # The model actually called, not the proxy alias; the alias is kept in raw
+  # as model_group.
   model:
     - "$.model"
-    - "$.response.model"
   provider:
-    - "$.litellm_params.custom_llm_provider"
-
-  temperature:
-    - "$.optional_params.temperature"
-  top_p:
-    - "$.optional_params.top_p"
-  max_tokens:
-    - "$.optional_params.max_tokens"
-  seed:
-    - "$.optional_params.seed"
-
-  token_input:
-    - "$.response.usage.prompt_tokens"
-  token_output:
-    - "$.response.usage.completion_tokens"
-
+    - "$.custom_llm_provider"
   finish_reason:
     - "$.response.choices[0].finish_reason"
 
-  # LiteLLM computes cost from its own price table (F-4.3).
+  temperature:
+    - "$.model_parameters.temperature"
+  top_p:
+    - "$.model_parameters.top_p"
+  max_tokens:
+    - "$.model_parameters.max_tokens"
+    - "$.model_parameters.max_completion_tokens"
+  seed:
+    - "$.model_parameters.seed"
+
+  token_input:
+    - "$.prompt_tokens"
+    - "$.response.usage.prompt_tokens"
+  token_output:
+    - "$.completion_tokens"
+    - "$.response.usage.completion_tokens"
+
   cost:
     - "$.response_cost"
 
+  # Present and non-empty only when the call failed.
+  error:
+    - "$.error_str"
+
   started_at:
-    - "$.start_time"
+    - "$.startTime"
   ended_at:
-    - "$.end_time"
+    - "$.endTime"

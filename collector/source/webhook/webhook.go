@@ -175,6 +175,13 @@ func (r *Receiver) Map(body []byte) ([]pipeline.Envelope, error) {
 		if err != nil {
 			return nil, fmt.Errorf("callback[%d]: %w", i, err)
 		}
+		// Tool steps first: they happened before the call that consumed
+		// their results, and their timestamps say so.
+		if r.opts.Mapping.ToolSteps == "openai_messages" {
+			if msgs, ok := r.opts.Mapping.get(item, "input"); ok {
+				out = append(out, toolStepsFromMessages(msgs, env)...)
+			}
+		}
 		out = append(out, env)
 	}
 	return out, nil
@@ -265,10 +272,36 @@ func (r *Receiver) mapOne(doc any) (pipeline.Envelope, error) {
 		}
 	}
 
+	// A failed call is a failed step and a failed episode. Without this a
+	// gateway error looked exactly like a success, and "keep errors" tail
+	// sampling would have had nothing to keep.
+	var callErr *record.Error
+	if msg := str(m.get(doc, "error")); msg != "" && msg != "None" {
+		if len(msg) > 500 {
+			msg = msg[:500]
+		}
+		e := record.Error{Type: "gateway_error", Message: msg}
+		step.Error = &e
+		callErr = &e
+	}
+
+	// A gateway cannot know when an agent run ends, so an episode would
+	// otherwise close only at window expiry, marked timed_out. A caller that
+	// does know can say so on its last call.
+	terminal := false
+	switch v := firstValue(m.get(doc, "episode_end")).(type) {
+	case bool:
+		terminal = v
+	case string:
+		terminal = v == "true" || v == "1"
+	}
+
 	return pipeline.Envelope{
 		SessionKey: session,
 		Source:     r.opts.Name,
 		SpanID:     spanID,
+		Terminal:   terminal,
+		Error:      callErr,
 		Step:       step,
 		Meta: pipeline.EpisodeMeta{
 			TaskType:               str(m.get(doc, "task_type")),
@@ -385,3 +418,10 @@ func unmappedRoots(doc any, consumed map[string]bool) map[string]string {
 // Rejected reports cumulative refused requests — oversized, malformed or
 // unauthorised — for cc_ingest_records_total{result="rejected"} (F-1.7).
 func (r *Receiver) Rejected() int64 { return r.rejected.Load() }
+
+func firstValue(v any, ok bool) any {
+	if !ok {
+		return nil
+	}
+	return v
+}

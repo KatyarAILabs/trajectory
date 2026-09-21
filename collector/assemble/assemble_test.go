@@ -449,3 +449,32 @@ func TestGroupIDCarried(t *testing.T) {
 			(*got2)[0].Episode.GroupID)
 	}
 }
+
+// The same observation reported twice with different timestamps keeps the
+// earliest — a gateway rebuilds a tool step on every later call — and a later
+// copy's terminal marker still closes the episode.
+func TestDuplicateKeepsEarliestAndStillHonoursTerminal(t *testing.T) {
+	clk := &fixedClock{t: time.Unix(1_757_000_000, 0).UTC()}
+	a, got := newTestAssembler(t, clk)
+
+	a.Add(span("s", "llm-1", "", 1_000_000, record.KindLLM, "first call"))
+	a.Add(span("s", "tool-x", "", 1_500_000, record.KindTool, "tool"))
+	a.Add(span("s", "llm-2", "", 2_000_000, record.KindLLM, "second call"))
+	late := span("s", "tool-x", "", 2_900_000, record.KindTool, "tool") // re-sighted later
+	late.Terminal = true
+	a.Add(late)
+	a.Flush(record.StatusTimedOut)
+
+	ep := (*got)[0]
+	if ep.Episode.Status != record.StatusComplete {
+		t.Errorf("status = %q; the terminal marker on the duplicate was ignored", ep.Episode.Status)
+	}
+	var order []string
+	for _, st := range ep.Steps {
+		order = append(order, *st.ContentInline)
+	}
+	want := []string{"first call", "tool", "second call"}
+	if fmt.Sprint(order) != fmt.Sprint(want) {
+		t.Errorf("order = %v, want %v", order, want)
+	}
+}

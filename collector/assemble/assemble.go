@@ -239,10 +239,27 @@ func (f *inFlight) absorb(env pipeline.Envelope, now time.Time, stats *Stats) {
 		// when it showed up.
 		id = syntheticSpanID(env)
 	}
-	if _, dup := f.spans[id]; dup {
+	// On a duplicate, keep the earliest sighting.
+	//
+	// For a genuine redelivery the copies are identical and the choice is
+	// moot. It matters when the same observation is reported more than
+	// once with different timestamps — a gateway rebuilds a tool step from
+	// history on every later call, and only the first sighting is close to
+	// when the tool actually ran. Keeping the earliest is also independent
+	// of arrival order, which keeping the latest is not, so the
+	// shuffle-determinism guarantee (F-3 acceptance) still holds.
+	//
+	// Only the stored span is kept; the rest of absorb still runs, because
+	// a later copy can carry something the first did not — a terminal
+	// marker most importantly.
+	if prev, dup := f.spans[id]; dup {
 		stats.Duplicates++
+		if env.Step.StartedAt < prev.Step.StartedAt {
+			f.spans[id] = env
+		}
+	} else {
+		f.spans[id] = env
 	}
-	f.spans[id] = env
 
 	// Episode-level metadata: first non-empty value wins, so a producer
 	// that sets task_type on only one span still gets it recorded.

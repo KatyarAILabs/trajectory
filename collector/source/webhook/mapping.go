@@ -26,6 +26,14 @@ type Mapping struct {
 	Kind      string              `yaml:"kind"`
 	FixedKind string              `yaml:"fixed_kind"`
 	Fields    map[string][]string `yaml:"fields"`
+	// ToolSteps rebuilds tool steps from conversation history. The only
+	// supported value is "openai_messages". A gateway never sees a tool
+	// run, but it does see the arguments the model asked for and the
+	// result fed back, and those are what entity extraction needs.
+	ToolSteps string `yaml:"tool_steps"`
+	// Exclude lists top-level fields never kept in raw — typically ones
+	// that identify the caller rather than the trajectory.
+	Exclude []string `yaml:"exclude"`
 
 	compiled map[string][]jp.Expr
 	// roots are the top-level keys the mapping reads, so everything else
@@ -39,7 +47,7 @@ var knownFields = map[string]bool{
 	"input": true, "output": true,
 	"model": true, "provider": true, "finish_reason": true,
 	"temperature": true, "top_p": true, "max_tokens": true, "seed": true,
-	"token_input": true, "token_output": true, "cost": true,
+	"token_input": true, "token_output": true, "cost": true, "error": true, "episode_end": true,
 	"started_at": true, "ended_at": true,
 }
 
@@ -73,8 +81,18 @@ func ParseMapping(b []byte, name string) (*Mapping, error) {
 		return nil, fmt.Errorf("mapping %s: fixed_kind %q is not a step kind", name, m.FixedKind)
 	}
 
+	switch m.ToolSteps {
+	case "", "openai_messages":
+	default:
+		return nil, fmt.Errorf("mapping %s: tool_steps must be \"openai_messages\" or empty, got %q",
+			name, m.ToolSteps)
+	}
+
 	m.compiled = map[string][]jp.Expr{}
 	m.roots = map[string]bool{}
+	for _, e := range m.Exclude {
+		m.roots[e] = true // excluded fields are treated as consumed: never kept in raw
+	}
 
 	fields := make([]string, 0, len(m.Fields))
 	for f := range m.Fields {

@@ -30,19 +30,25 @@ import (
 
 // Options configure a Receiver.
 type Options struct {
-	Name   string
+	Name string
+	// Listen is the OTLP/HTTP address. Empty disables the HTTP path.
 	Listen string
+	// GRPCListen is the OTLP/gRPC address. Empty disables the gRPC path.
+	GRPCListen string
 	// MaxRequestBytes rejects oversized requests rather than buffering
 	// them (F-1.7).
 	MaxRequestBytes int64
 	// SessionKeyOrder is the attribute precedence for grouping (F-3.1).
 	SessionKeyOrder []string
+	// Conventions maps producer attributes onto the canonical record.
+	Conventions *normalize.Registry
 }
 
 // Receiver is an OTLP/HTTP trace source.
 type Receiver struct {
-	opts Options
-	srv  *http.Server
+	opts    Options
+	srv     *http.Server
+	grpcSrv interface{ GracefulStop() }
 
 	accepted atomic.Int64
 	rejected atomic.Int64
@@ -79,8 +85,38 @@ func (r *Receiver) Stats() Stats {
 	}
 }
 
-// Start serves until ctx is cancelled.
+// Start serves every configured transport until ctx is cancelled.
+//
+// Both transports are optional and independent, so a deployment can expose
+// gRPC only, HTTP only, or both. Whichever fails first ends Start; the other
+// is stopped by the same cancelled context.
 func (r *Receiver) Start(ctx context.Context, next pipeline.Next) error {
+	if r.opts.Listen == "" && r.opts.GRPCListen == "" {
+		return fmt.Errorf("otlp source %q: neither http nor grpc listener is configured", r.opts.Name)
+	}
+
+	errCh := make(chan error, 2)
+	started := 0
+
+	if r.opts.GRPCListen != "" {
+		started++
+		go func() { errCh <- r.startGRPC(ctx, next) }()
+	}
+	if r.opts.Listen != "" {
+		started++
+		go func() { errCh <- r.startHTTP(ctx, next) }()
+	}
+
+	var firstErr error
+	for i := 0; i < started; i++ {
+		if err := <-errCh; err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+func (r *Receiver) startHTTP(ctx context.Context, next pipeline.Next) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/traces", r.handleTraces(next))
 
@@ -91,7 +127,7 @@ func (r *Receiver) Start(ctx context.Context, next pipeline.Next) error {
 
 	ln, err := net.Listen("tcp", r.opts.Listen)
 	if err != nil {
-		return fmt.Errorf("otlp source %q: listen %s: %w", r.opts.Name, r.opts.Listen, err)
+		return fmt.Errorf("otlp source %q: http listen %s: %w", r.opts.Name, r.opts.Listen, err)
 	}
 
 	go func() {
@@ -109,6 +145,9 @@ func (r *Receiver) Start(ctx context.Context, next pipeline.Next) error {
 
 // Shutdown implements pipeline.Source.
 func (r *Receiver) Shutdown(ctx context.Context) error {
+	if r.grpcSrv != nil {
+		r.grpcSrv.GracefulStop()
+	}
 	if r.srv == nil {
 		return nil
 	}
@@ -222,11 +261,10 @@ func (r *Receiver) dispatch(ctx context.Context, td ptrace.Traces, next pipeline
 					s.StatusMessage = span.Status().Message()
 				}
 
-				env := normalize.Normalize(s, r.opts.Name, r.opts.SessionKeyOrder)
-				env.Meta.InstrumentationVersion = scope.Version()
-				if name := scope.Name(); name != "" {
-					env.Meta.Instrumentation = name
-				}
+				s.ScopeName = scope.Name()
+				s.ScopeVersion = scope.Version()
+
+				env := normalize.Normalize(s, r.opts.Name, r.opts.SessionKeyOrder, r.opts.Conventions)
 
 				if err := next(ctx, env); err != nil {
 					return count, err

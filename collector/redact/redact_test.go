@@ -228,3 +228,203 @@ func TestRedactionIsIdempotent(t *testing.T) {
 		t.Errorf("not idempotent:\n once: %q\ntwice: %q", once, twice)
 	}
 }
+
+// F-5.1 path-based policy: a known-sensitive JSON field is redacted whole,
+// without writing a regex that might also hit something innocuous elsewhere.
+func TestPathRuleRedactsSelectedNode(t *testing.T) {
+	var c config.Redaction
+	c.Default = "allow"
+	c.Rules = []config.Rule{{
+		ID:     "ssn_field",
+		Action: ActionDrop,
+		Match:  config.RuleMatch{Path: "$.args.ssn"},
+	}}
+
+	r, err := New(c, testKey, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ep := episode(`{"args":{"id":"TKT-1","ssn":"123-45-6789"},"result":{"note":"123-45-6789 appears here too"}}`)
+	if err := r.Process(context.Background(), ep); err != nil {
+		t.Fatal(err)
+	}
+
+	got := *ep.Steps[0].ContentInline
+	if strings.Contains(got, `"ssn":"123-45-6789"`) {
+		t.Errorf("targeted field not redacted: %s", got)
+	}
+	if !strings.Contains(got, "TKT-1") {
+		t.Errorf("path rule damaged a sibling field: %s", got)
+	}
+	// The rule targeted one path, so the same digits elsewhere are
+	// untouched. That precision is the reason to use a path rather than a
+	// regex.
+	if !strings.Contains(got, "123-45-6789 appears here too") {
+		t.Errorf("path rule reached outside its path: %s", got)
+	}
+}
+
+// A path rule combined with a regex narrows the rule within the selected node.
+func TestPathRuleWithRegexNarrows(t *testing.T) {
+	var c config.Redaction
+	c.Default = "allow"
+	c.Rules = []config.Rule{{
+		ID:     "email_in_requester",
+		Action: ActionTokenize,
+		Match:  config.RuleMatch{Path: "$.args.requester", Regex: `[\w.+-]+@[\w-]+\.[\w.]+`},
+	}}
+
+	r, _ := New(c, testKey, nil)
+	ep := episode(`{"args":{"requester":"contact alice@example.com now","other":"bob@example.com"}}`)
+	if err := r.Process(context.Background(), ep); err != nil {
+		t.Fatal(err)
+	}
+
+	got := *ep.Steps[0].ContentInline
+	if strings.Contains(got, "alice@example.com") {
+		t.Errorf("email in the targeted path was not tokenized: %s", got)
+	}
+	if !strings.Contains(got, "contact tok_") {
+		t.Errorf("surrounding text in the node was lost: %s", got)
+	}
+	if !strings.Contains(got, "bob@example.com") {
+		t.Errorf("rule reached outside its path: %s", got)
+	}
+}
+
+// A payload that is not JSON must not be quarantined by a path rule. Producers
+// send prose, and a path rule simply does not apply to it.
+func TestPathRuleIgnoresNonJSON(t *testing.T) {
+	var c config.Redaction
+	c.Default = "allow"
+	c.Rules = []config.Rule{{
+		ID: "x", Action: ActionDrop, Match: config.RuleMatch{Path: "$.args.ssn"},
+	}}
+
+	r, _ := New(c, testKey, nil)
+	ep := episode("just some prose, definitely not JSON")
+	if err := r.Process(context.Background(), ep); err != nil {
+		t.Fatalf("a non-JSON payload was quarantined by a path rule: %v", err)
+	}
+	if *ep.Steps[0].ContentInline != "just some prose, definitely not JSON" {
+		t.Error("non-JSON payload was altered")
+	}
+}
+
+// An explicit deny wins over an allow, so a broad allow prefix can be carved
+// out without rewriting it.
+func TestExplicitDenyBeatsAllow(t *testing.T) {
+	var c config.Redaction
+	c.Default = "deny"
+	c.Allow = []string{"steps[*].raw"}
+	c.Deny = []string{"steps[*].raw.secret_token"}
+
+	r, _ := New(c, testKey, nil)
+	ep := episode("payload")
+	ep.Steps[0].Raw = map[string]string{
+		"harmless":     "keep me",
+		"secret_token": "sk-live-abc123",
+	}
+
+	if err := r.Process(context.Background(), ep); err != nil {
+		t.Fatal(err)
+	}
+	if got := ep.Steps[0].Raw["secret_token"]; got != "" {
+		t.Errorf("explicitly denied field survived: %q", got)
+	}
+	if got := ep.Steps[0].Raw["harmless"]; got != "keep me" {
+		t.Errorf("deny removed an unrelated allowed field: %q", got)
+	}
+}
+
+// F-5.6: metadata-only discards every payload, and no other setting re-admits
+// one.
+func TestMetadataOnlyDropsEverything(t *testing.T) {
+	var c config.Redaction
+	c.Default = "allow"
+	c.MetadataOnly = true
+	// Deliberately permissive settings alongside it; none may win.
+	c.Allow = []string{"steps[*].content_inline", "steps[*].raw"}
+
+	r, _ := New(c, testKey, nil)
+	ep := episode("a very sensitive prompt")
+	ep.Steps[0].Raw = map[string]string{"k": "v"}
+	ep.Steps[0].Model = ptr("claude-opus-5")
+
+	if err := r.Process(context.Background(), ep); err != nil {
+		t.Fatal(err)
+	}
+	if ep.Steps[0].ContentInline != nil {
+		t.Errorf("payload survived metadata-only mode: %q", *ep.Steps[0].ContentInline)
+	}
+	if len(ep.Steps[0].Raw) != 0 {
+		t.Errorf("raw survived metadata-only mode: %v", ep.Steps[0].Raw)
+	}
+	// Metadata is the point of the mode, so it must remain.
+	if ep.Steps[0].Model == nil || *ep.Steps[0].Model != "claude-opus-5" {
+		t.Error("metadata-only removed metadata")
+	}
+}
+
+// A rule can be scoped to particular fields.
+func TestRuleFieldScoping(t *testing.T) {
+	var c config.Redaction
+	c.Default = "allow"
+	c.Rules = []config.Rule{{
+		ID:     "email",
+		Action: ActionDrop,
+		Match:  config.RuleMatch{Regex: `[\w.+-]+@[\w-]+\.[\w.]+`},
+		Fields: []string{"steps[*].raw"},
+	}}
+
+	r, _ := New(c, testKey, nil)
+	ep := episode("payload has alice@example.com in it")
+	ep.Steps[0].Raw = map[string]string{"note": "bob@example.com"}
+
+	if err := r.Process(context.Background(), ep); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(ep.Steps[0].Raw["note"], "bob@example.com") {
+		t.Error("scoped rule did not fire on its field")
+	}
+	if !strings.Contains(*ep.Steps[0].ContentInline, "alice@example.com") {
+		t.Error("scoped rule fired outside its field scope")
+	}
+}
+
+// F-14.5: `cc redact --test` must not modify what it inspects.
+func TestPreviewDoesNotMutate(t *testing.T) {
+	r, _ := New(policy(), testKey, nil)
+
+	ep := episode("mail alice@example.com")
+	ep.Steps[0].Raw = map[string]string{"k": "carol@example.com"}
+	before := *ep.Steps[0].ContentInline
+	beforeRaw := ep.Steps[0].Raw["k"]
+
+	entries, err := r.Preview(ep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) == 0 {
+		t.Error("preview reported no changes for a payload containing an email")
+	}
+	if *ep.Steps[0].ContentInline != before {
+		t.Errorf("preview mutated the payload: %q -> %q", before, *ep.Steps[0].ContentInline)
+	}
+	if ep.Steps[0].Raw["k"] != beforeRaw {
+		t.Errorf("preview mutated raw: %q -> %q", beforeRaw, ep.Steps[0].Raw["k"])
+	}
+}
+
+// A rule with neither regex nor path never fires; constructing one is an error
+// rather than a silently inert policy.
+func TestRuleMatchingNothingRejected(t *testing.T) {
+	var c config.Redaction
+	c.Default = "allow"
+	c.Rules = []config.Rule{{ID: "inert", Action: ActionDrop}}
+
+	if _, err := New(c, testKey, nil); err == nil {
+		t.Fatal("a rule with no regex and no path was accepted")
+	}
+}

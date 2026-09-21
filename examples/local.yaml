@@ -1,24 +1,43 @@
-# A minimal local-development config (UC-5): no cloud account, no credentials,
-# no Kubernetes. Run it, send OTLP traces at it, inspect the Parquet with
-# DuckDB.
+# A local-development config (UC-5): no cloud account, no credentials, no
+# Kubernetes. Run it, send it traffic, inspect the Parquet with DuckDB.
 #
 #   export CC_HMAC_KEY=dev-key-not-for-production
 #   cc run -config examples/local.yaml
+#
+# Every key here is validated by `cc validate`. An unknown key is an error, not
+# a warning, so a typo cannot silently disable a policy.
 
 schema_version: "0.1.0"
 tenant: dev
 
 sources:
+  # Tracing conventions: OpenInference and OTel GenAI are both recognised, by
+  # attribute presence rather than by scope name.
   - name: otlp
     type: otlp
-    http:
-      listen: "127.0.0.1:4318"
+    http: {listen: "127.0.0.1:4318"}
+    grpc: {listen: "127.0.0.1:4317"}
+
+  # The native API (UC-3). This is the only path that can carry token spans,
+  # trainable masks and tool versions, because no tracing convention models
+  # them.
+  - name: sdk
+    type: native
+    http: {listen: "127.0.0.1:4319"}
+    # Uncomment to require a bearer token. The token itself comes from the
+    # environment, never from this file.
+    # auth: {type: bearer, token_env: CC_SDK_TOKEN}
 
 assembly:
   session_key: ["session.id", "gen_ai.conversation.id", "trace_id"]
   window: 5m
+  # How long to hold an episode open after its terminal marker, so spans still
+  # in flight are absorbed rather than splitting into a second episode.
   settle_after_terminal: 5s
   max_in_flight: 10000
+  # How many recently closed sessions to remember, so a late span becomes a
+  # patch on the right episode rather than a new episode built from a fragment.
+  patch_memory: 10000
 
 redaction:
   # Deny-by-default: only the paths listed below survive. Everything else is
@@ -28,7 +47,12 @@ redaction:
   allow:
     - "steps[*].content_inline"
     - "steps[*].raw"
+  # An explicit deny wins over an allow, so a broad prefix can be carved out
+  # without rewriting it.
+  deny:
+    - "steps[*].raw.internal_secret"
   rules:
+    # A regex rule matches anywhere in a field.
     - id: email
       match:
         regex: "[\\w.+-]+@[\\w-]+\\.[\\w.]+"
@@ -37,9 +61,21 @@ redaction:
       match:
         regex: "\\b(?:\\d[ -]*?){13,16}\\b"
       action: drop
+    # A path rule targets one JSON node, which is more precise than a regex
+    # that might also hit something innocuous elsewhere.
+    - id: ssn_field
+      match:
+        path: "$.args.ssn"
+      action: drop
   tokenization:
-    # The key comes from the environment, never from this file.
+    # The key comes from the environment, never from this file. Rotating it
+    # breaks joinability of new records against old ones, so a key_id is
+    # recorded to make a rotation detectable rather than silent.
     key_env: CC_HMAC_KEY
+
+  # Set to discard every payload, keeping only structure and metadata. No
+  # other setting re-admits a payload when this is on.
+  # metadata_only: true
 
 entities:
   - tool: zendesk.update_ticket
@@ -48,6 +84,23 @@ entities:
   - tool: stripe.create_refund
     keys:
       order_id: "$.result.metadata.order_id"
+
+sampling:
+  # Head sampling keys on the session, not the span, so an episode is never
+  # half-captured.
+  head:
+    rate: 1.0
+  tail:
+    # CEL, evaluated after assembly and after redaction. Any one matching keeps
+    # the episode.
+    keep_if:
+      - "status != 'complete'"
+      - "has_error"
+      - "raw['human_edited'] == 'true'"
+      # Episodes with no business key can never be joined to an outcome, so
+      # they are worth keeping and looking at.
+      - "entity_key_count == 0"
+    otherwise_rate: 1.0
 
 sinks:
   - name: local

@@ -31,9 +31,12 @@ import (
 	"github.com/trajectory-project/trajectory/collector/assemble"
 	"github.com/trajectory-project/trajectory/collector/config"
 	"github.com/trajectory-project/trajectory/collector/extract"
+	"github.com/trajectory-project/trajectory/collector/normalize"
 	"github.com/trajectory-project/trajectory/collector/pipeline"
 	"github.com/trajectory-project/trajectory/collector/redact"
+	"github.com/trajectory-project/trajectory/collector/sample"
 	"github.com/trajectory-project/trajectory/collector/sink/fsstore"
+	"github.com/trajectory-project/trajectory/collector/source/native"
 	"github.com/trajectory-project/trajectory/collector/source/otlp"
 	"github.com/trajectory-project/trajectory/collector/telemetry"
 	"github.com/trajectory-project/trajectory/pkg/record"
@@ -49,6 +52,7 @@ type Service struct {
 	assembler *assemble.Assembler
 	redactor  *redact.Redactor
 	extractor *extract.Extractor
+	sampler   *sample.Sampler
 	sink      *fsstore.Sink
 
 	// quarantineDir holds records that failed a processor. They are written
@@ -62,6 +66,11 @@ type Service struct {
 	// rather than being re-set to a running total.
 	lastFiles        int64
 	lastBlobsDeduped int64
+	// sampledOut counts episodes dropped by tail sampling, reported by
+	// `cc import` so a partner is not puzzled by a smaller corpus.
+	sampledOut int64
+	// dryRun suppresses sink writes for `cc import -dry-run`.
+	dryRun bool
 }
 
 // New builds a service from validated config.
@@ -90,23 +99,58 @@ func New(cfg *config.Config, log *slog.Logger) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.sampler, err = sample.New(cfg.Sampling)
+	if err != nil {
+		return nil, err
+	}
 
 	s.assembler = assemble.New(assemble.Options{
 		Tenant:              cfg.Tenant,
 		Window:              cfg.Assembly.Window,
 		MaxInFlight:         cfg.Assembly.MaxInFlight,
 		SettleAfterTerminal: cfg.Assembly.SettleAfterTerminal,
+		PatchMemory:         cfg.Assembly.PatchMemory,
 		NewID:               func() string { return ulid.Make().String() },
 	}, s.onEpisode)
 
-	for _, sc := range cfg.Sources {
-		s.sources = append(s.sources, otlp.New(otlp.Options{
-			Name:            sc.Name,
-			Listen:          sc.HTTP.Listen,
-			MaxRequestBytes: sc.MaxRequestBytes,
-			SessionKeyOrder: cfg.Assembly.SessionKey,
-		}))
+	conventions, err := normalize.LoadBuiltins()
+	if err != nil {
+		return nil, fmt.Errorf("load convention mappings: %w", err)
 	}
+
+	for _, sc := range cfg.Sources {
+		if sc.MappingsDir != "" {
+			if err := conventions.LoadDir(sc.MappingsDir); err != nil {
+				return nil, err
+			}
+		}
+
+		var token string
+		if sc.Auth.TokenEnv != "" {
+			token = os.Getenv(sc.Auth.TokenEnv)
+		}
+
+		switch sc.Type {
+		case "native":
+			s.sources = append(s.sources, native.New(native.Options{
+				Name:            sc.Name,
+				Listen:          sc.HTTP.Listen,
+				Tenant:          cfg.Tenant,
+				MaxRequestBytes: sc.MaxRequestBytes,
+				AuthToken:       token,
+			}))
+		default:
+			s.sources = append(s.sources, otlp.New(otlp.Options{
+				Name:            sc.Name,
+				Listen:          sc.HTTP.Listen,
+				GRPCListen:      sc.GRPC.Listen,
+				MaxRequestBytes: sc.MaxRequestBytes,
+				SessionKeyOrder: cfg.Assembly.SessionKey,
+				Conventions:     conventions,
+			}))
+		}
+	}
+	log.Info("conventions loaded", "mappings", conventions.Names())
 
 	if key != nil {
 		// A key_id in the log makes a rotation visible in operational
@@ -226,6 +270,15 @@ func (s *Service) flushSink(ctx context.Context) error {
 
 // onEnvelope is the Next handed to every source.
 func (s *Service) onEnvelope(_ context.Context, env pipeline.Envelope) error {
+	// Head sampling keys on the session, not the span, so every span of a
+	// session shares one decision and an episode is never half-captured
+	// (F-7.1).
+	if !s.sampler.HeadKeep(env.SessionKey) {
+		s.metrics.Sampled.WithLabelValues("dropped", "head").Inc()
+		s.metrics.IngestRecords.WithLabelValues(env.Source, "head_sampled").Inc()
+		return nil
+	}
+
 	s.metrics.IngestRecords.WithLabelValues(env.Source, "accepted").Inc()
 
 	// Clock skew is recorded, never corrected (§20).
@@ -253,12 +306,38 @@ func (s *Service) onEpisode(ep *pipeline.Assembled) {
 		}
 	}
 
+	// Tail sampling runs after the processors so a rule can reference
+	// entity_key_count, and after redaction so no rule can read an
+	// unredacted value (F-7.2).
+	if !s.sampler.TailKeep(ep) {
+		s.metrics.Sampled.WithLabelValues("dropped", "tail").Inc()
+		s.mu.Lock()
+		s.sampledOut++
+		s.mu.Unlock()
+		return
+	}
+	reason := "tail"
+	if ep.Episode.SampledBy != nil {
+		reason = *ep.Episode.SampledBy
+	}
+	s.metrics.Sampled.WithLabelValues("kept", reason).Inc()
+
 	s.metrics.EpisodesEmitted.WithLabelValues(ep.Episode.Status).Inc()
 	if ep.Episode.Status == record.StatusEvicted {
 		s.metrics.Evictions.Inc()
 	}
 	s.metrics.EntityKeysPerEpisode.Observe(float64(len(ep.Episode.EntityKeys)))
 	s.metrics.EpisodesWithoutKeysRatio.Set(s.extractor.CoverageRatio())
+
+	s.mu.Lock()
+	dry := s.dryRun
+	s.mu.Unlock()
+	if dry {
+		s.mu.Lock()
+		s.emitted++
+		s.mu.Unlock()
+		return
+	}
 
 	if err := s.sink.Write(ctx, []*pipeline.Assembled{ep}); err != nil {
 		s.metrics.SinkErrors.WithLabelValues(s.sink.Name(), "write").Inc()

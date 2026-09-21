@@ -311,3 +311,141 @@ func TestTerminalClosesAfterSettleAndAbsorbsLateSpan(t *testing.T) {
 		t.Errorf("step order is arrival-dependent: got %q first", *ep.Steps[0].ContentInline)
 	}
 }
+
+// F-3.5: a span arriving after its episode was emitted becomes an append-only
+// patch. The emitted episode is never mutated — its files may already have been
+// read, and a reader must never see two different contents for one episode_id.
+func TestLateSpanBecomesPatch(t *testing.T) {
+	clk := &fixedClock{t: time.Unix(1_757_000_000, 0).UTC()}
+	a, got := newTestAssembler(t, clk, func(o *Options) {
+		o.SettleAfterTerminal = time.Second
+	})
+
+	a.Add(terminal(span("sess-1", "a", "", 1_000_000, record.KindLLM, "done")))
+	clk.advance(2 * time.Second)
+	a.Expire()
+
+	if len(*got) != 1 {
+		t.Fatalf("got %d episodes before the late span, want 1", len(*got))
+	}
+	original := (*got)[0]
+	originalSteps := len(original.Steps)
+
+	// A span that missed the window entirely.
+	clk.advance(time.Second)
+	a.Add(span("sess-1", "late", "", 500_000, record.KindTool, "arrived too late"))
+
+	if len(*got) != 2 {
+		t.Fatalf("got %d records after the late span, want 2 (original + patch)", len(*got))
+	}
+	patch := (*got)[1]
+
+	if patch.Episode.Status != record.StatusPatched {
+		t.Errorf("patch status = %q, want %q", patch.Episode.Status, record.StatusPatched)
+	}
+	if patch.Episode.EpisodeID != original.Episode.EpisodeID {
+		t.Errorf("patch episode_id = %q, want %q so a reader can union them",
+			patch.Episode.EpisodeID, original.Episode.EpisodeID)
+	}
+	if len(patch.Steps) != 1 {
+		t.Fatalf("patch has %d steps, want 1", len(patch.Steps))
+	}
+	if *patch.Steps[0].ContentInline != "arrived too late" {
+		t.Errorf("patch carries the wrong step: %q", *patch.Steps[0].ContentInline)
+	}
+
+	// The original must be untouched.
+	if len(original.Steps) != originalSteps {
+		t.Errorf("the emitted episode was mutated: %d steps, was %d",
+			len(original.Steps), originalSteps)
+	}
+	if original.Episode.Status != record.StatusComplete {
+		t.Errorf("the emitted episode's status changed to %q", original.Episode.Status)
+	}
+
+	if s := a.Stats(); s.LateSpans != 1 || s.Patched != 1 {
+		t.Errorf("Stats LateSpans=%d Patched=%d, want 1/1", s.LateSpans, s.Patched)
+	}
+}
+
+// Two late spans must not collide on one step index.
+func TestMultiplePatchesGetDistinctIndices(t *testing.T) {
+	clk := &fixedClock{t: time.Unix(1_757_000_000, 0).UTC()}
+	a, got := newTestAssembler(t, clk, func(o *Options) { o.SettleAfterTerminal = 0 })
+
+	a.Add(terminal(span("sess-1", "a", "", 1_000_000, record.KindLLM, "done")))
+	a.Expire()
+
+	a.Add(span("sess-1", "late1", "", 500_000, record.KindTool, "one"))
+	a.Add(span("sess-1", "late2", "", 600_000, record.KindTool, "two"))
+
+	if len(*got) != 3 {
+		t.Fatalf("got %d records, want 3", len(*got))
+	}
+	i1 := (*got)[1].Steps[0].StepIdx
+	i2 := (*got)[2].Steps[0].StepIdx
+	if i1 == i2 {
+		t.Errorf("both patches used step_idx %d", i1)
+	}
+	// Patch indices sit clear of any plausible original index, so a reader
+	// that concatenates without sorting does not silently interleave them.
+	if i1 < patchIdxBase || i2 < patchIdxBase {
+		t.Errorf("patch indices %d,%d collide with the original index range", i1, i2)
+	}
+}
+
+// The patch memory is bounded. Unbounded growth here would defeat bounding the
+// assembly buffer at all.
+func TestPatchMemoryIsBounded(t *testing.T) {
+	clk := &fixedClock{t: time.Unix(1_757_000_000, 0).UTC()}
+	a, _ := newTestAssembler(t, clk, func(o *Options) {
+		o.SettleAfterTerminal = 0
+		o.PatchMemory = 10
+	})
+
+	for i := 0; i < 100; i++ {
+		a.Add(terminal(span(fmt.Sprintf("sess-%d", i), fmt.Sprintf("s%d", i), "",
+			int64(i)*1_000_000, record.KindLLM, "x")))
+		a.Expire()
+	}
+
+	a.mu.Lock()
+	n := len(a.emitted)
+	fifo := len(a.emittedFIFO)
+	a.mu.Unlock()
+
+	if n > 10 || fifo > 10 {
+		t.Errorf("patch memory grew to %d entries (fifo %d), want at most 10", n, fifo)
+	}
+}
+
+// F-3.6: a producer-supplied group_id is carried onto the episode. The
+// collector never infers one.
+func TestGroupIDCarried(t *testing.T) {
+	clk := &fixedClock{t: time.Unix(1_757_000_000, 0).UTC()}
+	a, got := newTestAssembler(t, clk)
+
+	e := terminal(span("sess-1", "a", "", 1_000_000, record.KindLLM, "x"))
+	e.Meta.GroupID = "rollout-7"
+	e.Meta.TaskType = "refund"
+	a.Add(e)
+	a.Flush(record.StatusTimedOut)
+
+	ep := (*got)[0].Episode
+	if ep.GroupID == nil || *ep.GroupID != "rollout-7" {
+		t.Errorf("group_id = %v, want rollout-7", ep.GroupID)
+	}
+	if ep.TaskType == nil || *ep.TaskType != "refund" {
+		t.Errorf("task_type = %v, want refund", ep.TaskType)
+	}
+
+	// Absent group_id must stay nil, not become an empty string: the
+	// column is nullable precisely because "no group" is meaningful.
+	a2, got2 := newTestAssembler(t, clk)
+	a2.Add(terminal(span("sess-2", "b", "", 1_000_000, record.KindLLM, "x")))
+	a2.Flush(record.StatusTimedOut)
+	if (*got2)[0].Episode.GroupID != nil {
+		t.Errorf("group_id = %v, want nil when the producer supplied none",
+			(*got2)[0].Episode.GroupID)
+	}
+}

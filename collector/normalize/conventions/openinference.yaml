@@ -1,0 +1,57 @@
+# OpenInference semantic conventions.
+# https://github.com/Arize-ai/openinference/blob/main/spec/semantic_conventions.md
+#
+# This file is data, not code (F-2.4). Convention churn upstream is handled by
+# editing it and pinning a conformance test against the version, rather than by
+# recompiling a parser.
+
+name: openinference
+# The convention version this mapping was written against. Recorded on every
+# episode so a fidelity gap stays attributable later (F-2.3).
+version: "0.1.14"
+
+# A span matches this convention if any of these attributes is present.
+detect:
+  - openinference.span.kind
+
+kind:
+  attribute: openinference.span.kind
+  # Unlisted values fall through to `default`, never to a dropped span (F-2.5).
+  default: other
+  values:
+    LLM: llm
+    TOOL: tool
+    RETRIEVER: retrieval
+    EMBEDDING: other
+    CHAIN: other
+    AGENT: other
+    RERANKER: other
+    GUARDRAIL: other
+    EVALUATOR: other
+
+# Canonical field <- the first attribute in the list that is present.
+fields:
+  session_key: [session.id, gen_ai.conversation.id]
+  group_id: [group.id, openinference.group.id]
+  task_type: [task.type, openinference.task.type]
+  episode_end: [episode.end]
+
+  input: [input.value]
+  output: [output.value]
+  role: [message.role, llm.role]
+
+  model: [llm.model_name]
+  provider: [llm.provider]
+  finish_reason: [llm.finish_reason]
+
+  tool_name: [tool.name]
+  tool_version: [tool.version]
+  tool_args: [tool.parameters]
+
+  # OpenInference carries generation parameters as one JSON blob.
+  invocation_params: [llm.invocation_parameters]
+
+  token_input: [llm.token_count.prompt]
+  token_output: [llm.token_count.completion]
+  token_cached: [llm.token_count.prompt_details.cache_read]
+  token_reasoning: [llm.token_count.completion_details.reasoning]

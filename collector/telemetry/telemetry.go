@@ -51,6 +51,11 @@ type Metrics struct {
 	FilesWritten      *prometheus.CounterVec
 	BlobsDeduped      prometheus.Counter
 
+	// Sampled is labelled by decision and by rule. The rule label is
+	// operator-authored config text, not user data, which is what keeps it
+	// inside the §11 no-user-data rule.
+	Sampled *prometheus.CounterVec
+
 	ClockSkew *prometheus.HistogramVec
 	BuildInfo *prometheus.GaugeVec
 
@@ -96,6 +101,9 @@ func New() *Metrics {
 		"Files written, by sink and table.", "sink", "table")
 	m.BlobsDeduped = counter(reg, "cc_blobs_deduped_total",
 		"Payloads that matched an existing blob and were not rewritten.")
+
+	m.Sampled = counterVec(reg, "cc_sampled_total",
+		"Sampling decisions, by decision and rule.", "decision", "rule")
 
 	m.ClockSkew = histogramVec(reg, "cc_clock_skew_seconds",
 		"Difference between producer and collector clocks. Recorded, never corrected.",

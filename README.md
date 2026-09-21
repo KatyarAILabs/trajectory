@@ -4,10 +4,24 @@ Capture agent trajectories at a fidelity sufficient for offline replay and
 scoring, redact what must never leave the perimeter, and land it in cheap,
 durable, queryable storage — with no opinion about what reads it afterwards.
 
-> **Status: pre-alpha, and not yet useful in production.** A walking skeleton
-> runs end to end — OTLP in, Parquet and content-addressed blobs out — but
-> there is no disk buffer, no S3 sink, no gRPC and no retry. Nothing is durable
-> across a sink outage yet. See [the build plan](docs/PLAN.md).
+> **Status: pre-alpha.** Every MUST in the capture path is implemented and
+> tested, but there is still **no disk buffer, no S3 sink and no retry**:
+> nothing survives a sink outage or a process kill mid-batch. That is Phase 3.
+> See [the build plan](docs/PLAN.md).
+
+## What works today
+
+| | |
+|---|---|
+| **Ingest** | OTLP over HTTP and gRPC; a native JSON/protobuf episode API; four import formats |
+| **Conventions** | OpenInference and OTel GenAI, selected per span by attribute presence, defined in [versioned data files](collector/normalize/conventions) rather than code |
+| **Redaction** | Deny-by-default allow-lists, explicit deny, regex and JSONPath rules, deterministic HMAC tokenization, metadata-only mode, fail-closed quarantine |
+| **Assembly** | Windowed, bounded, order-independent; retries stay branches; late spans become append-only patches |
+| **Sampling** | Head by session, tail by CEL; never splits an episode |
+| **Storage** | Parquet plus content-addressed deduplicated blobs, partitioned, manifest written last |
+| **CLI** | `run`, `validate`, `import`, `redact --test`, `inspect`, `replay` |
+
+Not yet: disk buffer, S3, retry/DLQ, TLS, Helm, OTel Collector components.
 
 ## Try it
 
@@ -65,6 +79,33 @@ breaks every reader.
 | `mappings/` | Declarative source mappings (litellm, portkey, helicone) |
 | `sdk/` | Python and TypeScript emit + read |
 | `deploy/helm/` | Chart, network policy, RBAC |
+
+## Evaluate it against your own data
+
+No deployment, no instrumentation change, no cloud account (UC-4):
+
+```sh
+cc import -config examples/local.yaml -from export.json langfuse
+cc replay -lake ./var/lake <episode-id>
+```
+
+Formats: `langfuse`, `langsmith`, `phoenix`, `jsonl`, `native`. The import path
+runs the same normalise → assemble → redact → extract → sink chain as live
+traffic, so what you see is what the live path will produce.
+
+It also reports **entity key coverage** — the share of episodes carrying a
+business key. That is the leading indicator that a future join will fail, and
+an import is the earliest possible moment to find out, rather than months later
+when someone tries the join.
+
+## Check a redaction policy before it runs
+
+```sh
+cc redact -config examples/local.yaml --test sample.json
+```
+
+Prints rule ids, field paths and match counts. Never a payload value — for the
+same reason the redaction manifest does not (F-5.4).
 
 ## Developing
 

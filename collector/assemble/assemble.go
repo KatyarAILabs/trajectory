@@ -49,6 +49,11 @@ type Options struct {
 	// A short settle satisfies both: out-of-order spans are absorbed, and
 	// latency stays bounded well under the window.
 	SettleAfterTerminal time.Duration
+	// PatchMemory is how many recently emitted session keys to remember so
+	// late spans can be attached to the right episode (F-3.5). Bounded,
+	// because unbounded memory here would defeat bounding the assembly
+	// buffer at all.
+	PatchMemory int
 	// Now is injectable so window behaviour is testable without sleeping.
 	Now func() time.Time
 	// NewID generates episode ids; injectable for deterministic tests.
@@ -66,6 +71,16 @@ type Assembler struct {
 	open  map[string]*list.Element
 	order *list.List
 
+	// emitted remembers recently closed sessions, so a span arriving after
+	// emit can be attached to the episode it belongs to as a patch rather
+	// than inventing a new episode from a fragment (F-3.5).
+	//
+	// It is bounded and evicted in insertion order: unbounded memory here
+	// would defeat the whole point of bounding the assembly buffer.
+	emitted     map[string]string
+	emittedFIFO []string
+	patchIdx    map[string]int32
+
 	stats Stats
 }
 
@@ -74,11 +89,11 @@ type Stats struct {
 	Evicted   int64
 	TimedOut  int64
 	Completed int64
-	// LateSpans counts spans that arrived for an episode already emitted.
-	// In Phase 1 these are dropped and counted; F-3.5's patch records are
-	// Phase 2. The counter exists now so the loss is visible rather than
-	// silent.
-	LateSpans  int64
+	// LateSpans counts spans that arrived for an episode already emitted
+	// and were carried in a patch record (F-3.5).
+	LateSpans int64
+	// Patched counts patch episodes emitted (F-3.5).
+	Patched    int64
 	Duplicates int64
 }
 
@@ -122,11 +137,15 @@ func New(opts Options, emit Emit) *Assembler {
 	if opts.SettleAfterTerminal < 0 {
 		opts.SettleAfterTerminal = 0
 	}
+	if opts.PatchMemory <= 0 {
+		opts.PatchMemory = 10000
+	}
 	return &Assembler{
-		opts:  opts,
-		emit:  emit,
-		open:  make(map[string]*list.Element),
-		order: list.New(),
+		opts:    opts,
+		emit:    emit,
+		open:    make(map[string]*list.Element),
+		order:   list.New(),
+		emitted: make(map[string]string, opts.PatchMemory),
 	}
 }
 
@@ -144,6 +163,18 @@ func (a *Assembler) Add(env pipeline.Envelope) {
 
 	el, ok := a.open[env.SessionKey]
 	if !ok {
+		// The episode for this session already closed. Emit the late
+		// span as an append-only patch rather than mutating the emitted
+		// episode (F-3.5) or starting a bogus new one from a fragment.
+		if epID, closed := a.emitted[env.SessionKey]; closed {
+			patch := a.patchFor(epID, env)
+			a.stats.LateSpans++
+			a.stats.Patched++
+			a.mu.Unlock()
+			a.emit(patch)
+			return
+		}
+
 		// At capacity: make room by emitting the oldest episode early,
 		// marked so a consumer knows it may be incomplete (F-3.7).
 		if a.order.Len() >= a.opts.MaxInFlight {

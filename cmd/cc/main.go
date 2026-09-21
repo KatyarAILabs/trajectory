@@ -33,6 +33,14 @@ func main() {
 		os.Exit(cmdRun(os.Args[2:]))
 	case "validate":
 		os.Exit(cmdValidate(os.Args[2:]))
+	case "import":
+		os.Exit(cmdImport(os.Args[2:]))
+	case "redact":
+		os.Exit(cmdRedact(os.Args[2:]))
+	case "inspect":
+		os.Exit(cmdInspect(os.Args[2:]))
+	case "replay":
+		os.Exit(cmdReplay(os.Args[2:]))
 	case "version":
 		fmt.Printf("cc %s (commit %s, schema %s)\n",
 			version.Collector, version.Commit, version.Schema)
@@ -46,16 +54,19 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `cc - the trajectory collector
+	fmt.Fprintf(os.Stderr, `cc - the trajectory collector
 
 Usage:
-  cc run      -config <file>   Run the collector
-  cc validate -config <file>   Check a config file, exit non-zero on error
-  cc version                   Print version and schema version
+  cc run      -config <file>                 Run the collector
+  cc validate -config <file>                 Check a config file, exit non-zero on error
+  cc import   -config <file> -from <path> <format>
+                                             Backfill a historical export
+  cc redact   -config <file> --test <file>   Show what the redaction policy would do
+  cc inspect  <file>                         Summarise a Parquet file, blob or manifest
+  cc replay   -lake <dir> <episode-id>       Print a reconstructed episode
+  cc version                                 Print version and schema version
 
-Not yet implemented (Phase 2):
-  cc import, cc inspect, cc redact --test, cc replay
-`)
+%s`, formatHelp())
 }
 
 // cmdValidate implements F-14.2. It exits non-zero on error so it is usable as

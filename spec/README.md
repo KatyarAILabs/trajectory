@@ -65,10 +65,8 @@ producer.
 The published JSON Schema lists **both**, so either is accepted. The conversion
 between them lives in exactly one place, `pkg/record/enums.go`.
 
-> **Open item for Phase 1.** The permissive-decoder behaviour above is asserted
-> by the JSON Schema but no decoder implements it yet. Whichever ingest handler
-> lands first must honour both spellings, or the published schema becomes a
-> promise the collector does not keep.
+Both spellings are accepted on the native JSON API, in `collector/wire`, which
+is tested against the published schema's enum lists.
 
 ## Timestamps
 
@@ -92,3 +90,33 @@ A step's payload is in exactly one of two places:
 
 Deduplication is the point: a system prompt repeated across millions of
 episodes is stored once (§7.3).
+
+## Payload shape
+
+`content_inline` and the blob a `content_ref` points at hold a **JSON
+envelope**, not a bare string:
+
+```json
+{"input": …, "output": …}     // llm, retrieval, human, other
+{"args":  …, "result": …}     // tool
+```
+
+A value that is itself JSON is embedded as JSON so a path reaches into it;
+anything else is embedded as the exact string the producer sent. Nothing is
+truncated or reformatted (F-4.1).
+
+The structure is not decoration. A replayer needs the prompt and a scorer needs
+the completion, and they have to stay separable; and entity extraction
+addresses these with JSONPath from config (`$.args.id`), which requires args and
+result to remain addressable rather than flattened together.
+
+## What `fidelity.has_params` does and does not mean
+
+It means the source reported generation parameters. It does **not** mean they
+are sufficient to reproduce the call.
+
+A seed is what makes a sampled completion reproducible, and most tracing
+exports drop it — so an episode can carry `has_params: true` and still not
+replay exactly. `cc replay` says so explicitly when it sees params without a
+seed. A consumer filtering for exactly-reproducible episodes should check for a
+seed on the LLM steps, not only the flag.

@@ -236,9 +236,15 @@ func TestDoD1(t *testing.T) {
 
 	// --- Partitioning (F-9.2) ---
 
-	want := filepath.Join(lake, record.TableEpisodes, "dt=2026-09-20", "tenant=acme", "task_type=unknown")
+	// task_type comes from the producer's task.type attribute, which the
+	// OpenInference mapping consumes. A partition of "unknown" here would
+	// mean the convention table stopped reading it.
+	want := filepath.Join(lake, record.TableEpisodes, "dt=2026-09-20", "tenant=acme", "task_type=refund")
 	if _, err := os.Stat(want); err != nil {
 		t.Errorf("expected partition directory %s: %v", want, err)
+	}
+	if ep.TaskType == nil || *ep.TaskType != "refund" {
+		t.Errorf("task_type = %v, want refund", ep.TaskType)
 	}
 }
 

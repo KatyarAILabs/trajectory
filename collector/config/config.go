@@ -30,19 +30,36 @@ type Config struct {
 	Assembly  Assembly  `yaml:"assembly"`
 	Redaction Redaction `yaml:"redaction"`
 	Entities  []Entity  `yaml:"entities"`
+	Sampling  Sampling  `yaml:"sampling"`
 	Sinks     []Sink    `yaml:"sinks"`
 	Telemetry Telemetry `yaml:"telemetry"`
 }
 
 type Source struct {
 	Name string `yaml:"name"`
+	// Type is "otlp" or "native".
 	Type string `yaml:"type"`
 	HTTP struct {
 		Listen string `yaml:"listen"`
 	} `yaml:"http"`
+	// GRPC is the OTLP/gRPC listener. Both transports are independent, so
+	// a deployment may expose either or both.
+	GRPC struct {
+		Listen string `yaml:"listen"`
+	} `yaml:"grpc"`
+	// Auth is the per-source credential (F-12.1). The token itself comes
+	// from the environment, never inline (F-11.1).
+	Auth struct {
+		Type     string `yaml:"type"`
+		TokenEnv string `yaml:"token_env"`
+	} `yaml:"auth"`
 	// MaxRequestBytes rejects oversized requests with a clear error and a
 	// metric rather than buffering them (F-1.7).
 	MaxRequestBytes int64 `yaml:"max_request_bytes"`
+	// MappingsDir overrides builtin convention mappings by name, so an
+	// operator can track a producer that has moved ahead of the shipped
+	// tables without waiting for a release (F-2.4).
+	MappingsDir string `yaml:"mappings_dir"`
 }
 
 type Assembly struct {
@@ -59,6 +76,10 @@ type Assembly struct {
 	// marker so spans still in flight are absorbed rather than splitting
 	// into a second episode. See assemble.Options for why this exists.
 	SettleAfterTerminal time.Duration `yaml:"settle_after_terminal"`
+	// PatchMemory is how many recently emitted sessions to remember so a
+	// late span becomes a patch on the right episode rather than a new
+	// episode built from a fragment (F-3.5).
+	PatchMemory int `yaml:"patch_memory"`
 }
 
 type Redaction struct {
@@ -66,9 +87,19 @@ type Redaction struct {
 	// allow-listed paths survive.
 	Default string `yaml:"default"`
 	// OnError is `quarantine` or `pass`. Closed is the default (F-5.5).
-	OnError string   `yaml:"on_error"`
-	Allow   []string `yaml:"allow"`
-	Rules   []Rule   `yaml:"rules"`
+	OnError string `yaml:"on_error"`
+	// Allow lists the field paths that survive under deny-by-default.
+	Allow []string `yaml:"allow"`
+	// Deny removes field paths even when they would otherwise be allowed.
+	// An explicit deny always wins, so a broad allow prefix can be carved
+	// out without rewriting it.
+	Deny  []string `yaml:"deny"`
+	Rules []Rule   `yaml:"rules"`
+	// MetadataOnly discards every payload, keeping only structure and
+	// metadata (F-5.6). It overrides allow and rules entirely: there is no
+	// combination of other settings that lets a payload through when this
+	// is set.
+	MetadataOnly bool `yaml:"metadata_only"`
 
 	Tokenization struct {
 		// KeyEnv names the environment variable holding the HMAC key.
@@ -79,17 +110,50 @@ type Redaction struct {
 }
 
 type Rule struct {
-	ID    string `yaml:"id"`
-	Match struct {
-		Regex string `yaml:"regex"`
-	} `yaml:"match"`
+	ID    string    `yaml:"id"`
+	Match RuleMatch `yaml:"match"`
 	// Action is `tokenize` or `drop`.
 	Action string `yaml:"action"`
+	// Fields narrows a rule to particular field paths. Empty means every
+	// field the policy lets through.
+	Fields []string `yaml:"fields"`
+}
+
+// RuleMatch selects what a rule applies to. Regex and Path may be combined:
+// the path narrows the rule to part of a JSON payload, and the regex then
+// selects within it. A rule with neither matches nothing and is rejected at
+// validation, because a rule that silently never fires is worse than absent.
+type RuleMatch struct {
+	// Regex matches anywhere in a field value.
+	Regex string `yaml:"regex"`
+	// Path is a JSONPath into a payload that parses as JSON. Matched nodes
+	// are redacted whole, which is how a known-sensitive field is handled
+	// without writing a regex that might also hit something else.
+	Path string `yaml:"path"`
 }
 
 type Entity struct {
 	Tool string            `yaml:"tool"`
 	Keys map[string]string `yaml:"keys"`
+}
+
+// Sampling controls volume (F-7). The unit of sampling is always the assembled
+// episode, never the span: a half-sampled trajectory looks complete to a reader
+// and is worse than no trajectory at all.
+type Sampling struct {
+	Head struct {
+		// Rate in [0,1]. Nil means keep everything. The decision is a
+		// deterministic hash of the session key, so every span of a
+		// session shares one answer.
+		Rate *float64 `yaml:"rate"`
+	} `yaml:"head"`
+	Tail struct {
+		// KeepIf are CEL expressions evaluated after assembly. Any one
+		// matching keeps the episode.
+		KeepIf []string `yaml:"keep_if"`
+		// OtherwiseRate applies to episodes no keep_if rule matched.
+		OtherwiseRate *float64 `yaml:"otherwise_rate"`
+	} `yaml:"tail"`
 }
 
 type Sink struct {
@@ -182,6 +246,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Assembly.SettleAfterTerminal == 0 {
 		c.Assembly.SettleAfterTerminal = 5 * time.Second
+	}
+	if c.Assembly.PatchMemory == 0 {
+		c.Assembly.PatchMemory = 10000
 	}
 	if len(c.Assembly.SessionKey) == 0 {
 		c.Assembly.SessionKey = []string{"session.id", "gen_ai.conversation.id", "trace_id"}

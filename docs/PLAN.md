@@ -210,3 +210,100 @@ say it is structured. Readers need to know this.
 | Late spans after emit are counted, not patched | The counter makes the loss visible rather than silent | F-3.5 patch records, Phase 2 |
 | The JSON Schema advertises two enum spellings; no decoder honours both yet | Nothing decodes JSON episodes yet | The first `POST /v1/episodes` handler, Phase 2 |
 | No unit tests for the sink, OTLP receiver, service or telemetry | All four are exercised end-to-end by DoD-1 | A refactor that DoD-1 happens not to cover |
+
+---
+
+## Appendix B — Phase 2 build notes
+
+### B.1 FNV-1a silently under-sampled by a third
+
+The first head sampler hashed the session key with FNV-1a and took the top
+bits. Configured for 10%, it kept **6.8%**. FNV-1a's avalanche in the high bits
+is weak for near-identical inputs, which is exactly what session ids are.
+
+An operator would have collected two thirds of the data they asked for and had
+no way to notice: the rate is not reported anywhere, and the corpus would just
+be smaller than expected. Fixed with a splitmix64 finalizer, which costs a
+couple of nanoseconds. The test asserts measured rates within 2 points of the
+configured value across four rates, because this class of bug is invisible
+without one.
+
+### B.2 The spec's own example sampling rule would have disabled sampling
+
+Spec §10 shows this tail rule:
+
+```yaml
+keep_if:
+  - "episode.raw['human_edited'] == 'true'"
+```
+
+Under CEL's default map semantics, indexing an absent key is an **error**, not
+a false. Most episodes do not carry `human_edited`. And since a rule that fails
+to evaluate keeps the episode — deliberately, so a sampling bug never silently
+deletes data — this policy would have degraded into "keep everything" on every
+ordinary episode, invisible except as an unexpectedly large storage bill.
+
+Fixed with a map wrapper where a missing key reads as the empty string.
+`Contains` is left honest, so `'k' in raw` still distinguishes present from
+absent.
+
+**Spec note:** worth stating in §10 that indexing is lenient and `in` is the
+presence test.
+
+### B.3 Opposite failure directions for redaction and sampling
+
+These two look symmetrical and are not, which is worth stating explicitly
+because it is the kind of thing a later contributor will "fix" in the wrong
+direction:
+
+| Stage | On rule failure | Why |
+|---|---|---|
+| Redaction | **Quarantine** the episode | Passing an unredacted record on is a breach |
+| Sampling | **Keep** the episode | Dropping on a bug is silent data loss |
+
+Both are failing safe. They just disagree about which direction safe is.
+
+### B.4 Enum spellings: the schema's promise is now kept
+
+Phase 1 left the published JSON Schema advertising both `STATUS_COMPLETE` and
+`complete` with no decoder honouring either-or. `collector/wire` now accepts
+both on the native API, and the test asserts against the same vocabulary the
+schema publishes.
+
+An invalid enum is an error rather than being coerced to `other`. F-2.5's
+retention rule is about span kinds a *tracing convention* did not define; a
+native producer sending an invalid value against a published schema is a bug in
+that producer, and saying so is more useful than silently reclassifying data.
+
+### B.5 `has_params: true` does not mean replayable
+
+Langfuse exports carry temperature and max_tokens but no seed. The fidelity
+flag says `has_params: true`, which is accurate — parameters *were* reported —
+but a consumer reading it as "this can be replayed exactly" would be wrong,
+because a sampled completion without a seed will not reproduce.
+
+Rather than overload the boolean, `cc replay` now says so explicitly, and
+`spec/README.md` documents the distinction. **A consumer filtering for
+exactly-reproducible episodes should check for a seed on the LLM steps, not
+only the flag.**
+
+### B.6 Payload shape is a contract the spec does not describe
+
+§7.2 calls `content_inline` a payload and says nothing about its structure. It
+is a JSON envelope — `{"args":…,"result":…}` for tool steps, `{"input":…,"output":…}`
+otherwise — because entity extraction addresses it with JSONPath from config
+and a flattened string would make `$.args.id` unwritable.
+
+Now documented in `spec/README.md`. **The spec should say this in §7.2**; a
+reader writing against the tables alone would not expect it.
+
+### B.7 Deferred, with the reason
+
+| Deferred | Why it is safe for now | When it bites |
+|---|---|---|
+| Gateway mappings (F-1.3), file tail (F-1.4), Kafka (F-1.5) | SHOULD/MAY, and the declarative mapping format they need is already proven by the convention tables | UC-1, a gateway-only deployment |
+| Per-source redaction override (F-5.7) | Single-tenant deployments share one policy | A collector fronting two teams with different rules |
+| Per-tenant quota and shed (F-7.3) | Single-tenant per deployment (Q-5) | Multi-tenancy, which is a v1.1 question anyway |
+| External PII detection (F-5.8) | Regex plus allow-list covers the structured cases; the hook is an interface away | A partner with free-text PII that no regex catches |
+| Logprobs (F-4.5) | MAY, and no convention carries them | A partner doing token-level analysis |
+| `cc inspect` cannot read a partially written file | The manifest is written last, so an unmanifested file is not yet real to a reader | Debugging a crashed write, where a partial file is exactly what you want to look at |

@@ -38,6 +38,7 @@ func (c *Config) Validate(path string) error {
 	c.validateAssembly(bad)
 	c.validateRedaction(bad)
 	c.validateEntities(bad)
+	c.validateSampling(bad)
 	c.validateSinks(bad)
 
 	if len(errs) > 0 {
@@ -51,6 +52,7 @@ func (c *Config) validateSources(bad func(string, string, ...any)) {
 		bad("sources", "at least one source is required")
 	}
 	seen := map[string]bool{}
+	listeners := map[string]string{}
 	for i, s := range c.Sources {
 		key := fmt.Sprintf("sources[%d]", i)
 		if s.Name == "" {
@@ -61,11 +63,55 @@ func (c *Config) validateSources(bad func(string, string, ...any)) {
 		}
 		seen[s.Name] = true
 
-		if s.Type != "otlp" {
-			bad(key+".type", "%q is not supported in this build; only \"otlp\" is", s.Type)
+		switch s.Type {
+		case "otlp":
+			if s.HTTP.Listen == "" && s.GRPC.Listen == "" {
+				bad(key, "an otlp source needs http.listen, grpc.listen, or both")
+			}
+		case "native":
+			if s.HTTP.Listen == "" {
+				bad(key+".http.listen", "required for a native source")
+			}
+			if s.GRPC.Listen != "" {
+				bad(key+".grpc.listen",
+					"the native API is HTTP only; remove this or use type: otlp")
+			}
+		default:
+			bad(key+".type", "%q is not supported; use \"otlp\" or \"native\"", s.Type)
 		}
-		if s.HTTP.Listen == "" {
-			bad(key+".http.listen", "required")
+
+		switch s.Auth.Type {
+		case "", "none":
+		case "bearer":
+			if s.Auth.TokenEnv == "" {
+				bad(key+".auth.token_env", "required when auth.type is \"bearer\"")
+			} else if os.Getenv(s.Auth.TokenEnv) == "" {
+				bad(key+".auth.token_env",
+					"environment variable %q is unset or empty; the source would "+
+						"reject every request", s.Auth.TokenEnv)
+			}
+		default:
+			bad(key+".auth.type", "must be \"bearer\" or \"none\", got %q", s.Auth.Type)
+		}
+
+		if s.MappingsDir != "" {
+			if fi, err := os.Stat(s.MappingsDir); err != nil {
+				bad(key+".mappings_dir", "cannot read %s: %v", s.MappingsDir, err)
+			} else if !fi.IsDir() {
+				bad(key+".mappings_dir", "%s is not a directory", s.MappingsDir)
+			}
+		}
+
+		// Two sources cannot share a listener; the second would fail at
+		// bind time with a message that does not mention config.
+		for _, addr := range []string{s.HTTP.Listen, s.GRPC.Listen} {
+			if addr == "" {
+				continue
+			}
+			if owner, taken := listeners[addr]; taken {
+				bad(key, "listen address %s is already used by source %q", addr, owner)
+			}
+			listeners[addr] = s.Name
 		}
 	}
 }
@@ -115,10 +161,18 @@ func (c *Config) validateRedaction(bad func(string, string, ...any)) {
 		if r.ID == "" {
 			bad(key+".id", "required; the id appears in the redaction manifest and in metrics")
 		}
-		if r.Match.Regex == "" {
-			bad(key+".match.regex", "required")
-		} else if _, err := regexp.Compile(r.Match.Regex); err != nil {
-			bad(key+".match.regex", "does not compile: %v", err)
+		if r.Match.Regex == "" && r.Match.Path == "" {
+			bad(key+".match",
+				"needs regex, path, or both; a rule that matches nothing "+
+					"never fires and is worse than not being there")
+		}
+		if r.Match.Regex != "" {
+			if _, err := regexp.Compile(r.Match.Regex); err != nil {
+				bad(key+".match.regex", "does not compile: %v", err)
+			}
+		}
+		if r.Match.Path != "" && !strings.HasPrefix(r.Match.Path, "$") {
+			bad(key+".match.path", "must be a JSONPath starting with $, got %q", r.Match.Path)
 		}
 		switch r.Action {
 		case "tokenize":
@@ -129,7 +183,15 @@ func (c *Config) validateRedaction(bad func(string, string, ...any)) {
 		}
 	}
 
-	if needsKey {
+	// Metadata-only discards payloads outright, so payload-shaped settings
+	// alongside it are a sign the operator expects them to do something.
+	if c.Redaction.MetadataOnly && (len(c.Redaction.Allow) > 0 || len(c.Redaction.Rules) > 0) {
+		bad("redaction.metadata_only",
+			"is true, which discards every payload, but allow paths or rules are "+
+				"also configured; remove one so the intent is unambiguous")
+	}
+
+	if needsKey && !c.Redaction.MetadataOnly {
 		env := c.Redaction.Tokenization.KeyEnv
 		if env == "" {
 			bad("redaction.tokenization.key_env", "required when any rule uses action \"tokenize\"")
@@ -155,6 +217,28 @@ func (c *Config) validateEntities(bad func(string, string, ...any)) {
 				bad(fmt.Sprintf("%s.keys.%s", key, name),
 					"must be a JSONPath starting with $, got %q", expr)
 			}
+		}
+	}
+}
+
+func (c *Config) validateSampling(bad func(string, string, ...any)) {
+	if r := c.Sampling.Head.Rate; r != nil && (*r < 0 || *r > 1) {
+		bad("sampling.head.rate", "must be between 0 and 1, got %v", *r)
+	}
+	if r := c.Sampling.Tail.OtherwiseRate; r != nil && (*r < 0 || *r > 1) {
+		bad("sampling.tail.otherwise_rate", "must be between 0 and 1, got %v", *r)
+	}
+
+	// Head sampling composes multiplicatively with tail sampling, and an
+	// operator who sets head 0.1 and tail 0.1 expecting 10%% will actually
+	// get 1%%. Refusing silence here is cheaper than discovering the corpus
+	// is a tenth the expected size months later.
+	if h := c.Sampling.Head.Rate; h != nil && *h < 1 {
+		if t := c.Sampling.Tail.OtherwiseRate; t != nil && *t < 1 {
+			bad("sampling",
+				"head.rate (%v) and tail.otherwise_rate (%v) compose multiplicatively, "+
+					"keeping roughly %.1f%% of unmatched episodes; set one to 1.0 if that is not intended",
+				*h, *t, *h**t*100)
 		}
 	}
 }

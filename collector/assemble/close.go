@@ -18,6 +18,7 @@ func (a *Assembler) closeLocked(f *inFlight, status string) *pipeline.Assembled 
 		a.order.Remove(el)
 		delete(a.open, f.key)
 	}
+	a.rememberEmitted(f.key, f.episodeID)
 
 	steps := f.orderedSteps()
 

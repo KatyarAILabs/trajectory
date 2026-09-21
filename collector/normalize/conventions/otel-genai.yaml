@@ -1,0 +1,59 @@
+# OpenTelemetry GenAI semantic conventions.
+# https://opentelemetry.io/docs/specs/semconv/gen-ai/
+#
+# These conventions are explicitly unstable upstream, which is the reason
+# F-2.4 wants mappings as versioned data: an upstream rename is a change to
+# this file and a new conformance fixture, not a code change.
+
+name: otel-genai
+version: "1.30.0"
+
+detect:
+  - gen_ai.operation.name
+  - gen_ai.system
+  - gen_ai.provider.name
+
+kind:
+  attribute: gen_ai.operation.name
+  default: other
+  values:
+    chat: llm
+    text_completion: llm
+    generate_content: llm
+    execute_tool: tool
+    embeddings: other
+    create_agent: other
+    invoke_agent: other
+
+fields:
+  session_key: [gen_ai.conversation.id, session.id]
+  group_id: [gen_ai.group.id]
+  task_type: [gen_ai.agent.name, task.type]
+  episode_end: [episode.end]
+
+  # The 1.30+ message attributes come first; the older prompt/completion pair
+  # is kept as a fallback so an older instrumentation still yields payloads.
+  input: [gen_ai.input.messages, gen_ai.prompt]
+  output: [gen_ai.output.messages, gen_ai.completion]
+
+  model: [gen_ai.request.model, gen_ai.response.model]
+  provider: [gen_ai.provider.name, gen_ai.system]
+  finish_reason: [gen_ai.response.finish_reasons]
+
+  tool_name: [gen_ai.tool.name]
+  tool_version: [gen_ai.tool.version]
+  tool_args: [gen_ai.tool.call.arguments]
+
+  # Unlike OpenInference, GenAI carries each parameter as its own attribute.
+  # Both shapes are supported; scalars win when both are present because they
+  # are the more specific source.
+  temperature: [gen_ai.request.temperature]
+  top_p: [gen_ai.request.top_p]
+  max_tokens: [gen_ai.request.max_tokens]
+  seed: [gen_ai.request.seed]
+  stop_sequences: [gen_ai.request.stop_sequences]
+
+  token_input: [gen_ai.usage.input_tokens]
+  token_output: [gen_ai.usage.output_tokens]
+  token_cached: [gen_ai.usage.cached_input_tokens]
+  token_reasoning: [gen_ai.usage.reasoning_tokens]

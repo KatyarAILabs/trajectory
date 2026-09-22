@@ -23,9 +23,9 @@ import (
 	"github.com/parquet-go/parquet-go"
 	"go.opentelemetry.io/collector/pdata/ptrace/ptraceotlp"
 
-	"github.com/trajectory-project/trajectory/collector/config"
-	"github.com/trajectory-project/trajectory/collector/sink/lake"
-	"github.com/trajectory-project/trajectory/pkg/record"
+	"github.com/KatyarAILabs/trajectory/collector/config"
+	"github.com/KatyarAILabs/trajectory/collector/sink/lake"
+	"github.com/KatyarAILabs/trajectory/pkg/record"
 )
 
 // F-9.1 end to end: the production sink, against a real S3 API.

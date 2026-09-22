@@ -7,8 +7,8 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/KatyarAILabs/trajectory/internal/version"
 	"github.com/parquet-go/parquet-go"
-	"github.com/trajectory-project/trajectory/internal/version"
 )
 
 func ptr[T any](v T) *T { return &v }

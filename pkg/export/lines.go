@@ -6,9 +6,9 @@ package export
 import (
 	"encoding/json"
 
-	"github.com/trajectory-project/trajectory/pkg/join"
-	"github.com/trajectory-project/trajectory/pkg/lakeread"
-	"github.com/trajectory-project/trajectory/pkg/record"
+	"github.com/KatyarAILabs/trajectory/pkg/join"
+	"github.com/KatyarAILabs/trajectory/pkg/lakeread"
+	"github.com/KatyarAILabs/trajectory/pkg/record"
 )
 
 type stepLine struct {

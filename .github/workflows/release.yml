@@ -48,8 +48,8 @@ jobs:
           # both noise and a small information leak.
           go build -trimpath \
             -ldflags="-s -w \
-              -X github.com/trajectory-project/trajectory/internal/version.Collector=${version} \
-              -X github.com/trajectory-project/trajectory/internal/version.Commit=${GITHUB_SHA::8}" \
+              -X github.com/KatyarAILabs/trajectory/internal/version.Collector=${version} \
+              -X github.com/KatyarAILabs/trajectory/internal/version.Commit=${GITHUB_SHA::8}" \
             -o "dist/${out}" ./cmd/cc
           (cd dist && sha256sum "${out}" > "${out}.sha256")
 

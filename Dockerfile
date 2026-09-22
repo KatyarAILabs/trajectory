@@ -19,8 +19,8 @@ ARG COMMIT=unknown
 RUN CGO_ENABLED=0 go build \
       -trimpath \
       -ldflags="-s -w \
-        -X github.com/trajectory-project/trajectory/internal/version.Collector=${VERSION} \
-        -X github.com/trajectory-project/trajectory/internal/version.Commit=${COMMIT}" \
+        -X github.com/KatyarAILabs/trajectory/internal/version.Collector=${VERSION} \
+        -X github.com/KatyarAILabs/trajectory/internal/version.Commit=${COMMIT}" \
       -o /out/cc ./cmd/cc
 
 # Runtime stage.

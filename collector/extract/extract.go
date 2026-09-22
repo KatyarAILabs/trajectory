@@ -20,11 +20,11 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/KatyarAILabs/trajectory/collector/config"
+	"github.com/KatyarAILabs/trajectory/collector/pipeline"
+	"github.com/KatyarAILabs/trajectory/pkg/record"
 	"github.com/ohler55/ojg/jp"
 	"github.com/ohler55/ojg/oj"
-	"github.com/trajectory-project/trajectory/collector/config"
-	"github.com/trajectory-project/trajectory/collector/pipeline"
-	"github.com/trajectory-project/trajectory/pkg/record"
 )
 
 // Extractor applies per-tool key expressions to an episode's steps.

@@ -15,7 +15,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	"github.com/trajectory-project/trajectory/collector/acceptance"
+	"github.com/KatyarAILabs/trajectory/collector/acceptance"
 )
 
 func main() {

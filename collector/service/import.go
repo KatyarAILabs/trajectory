@@ -8,9 +8,9 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/trajectory-project/trajectory/collector/pipeline"
-	"github.com/trajectory-project/trajectory/importers"
-	"github.com/trajectory-project/trajectory/pkg/record"
+	"github.com/KatyarAILabs/trajectory/collector/pipeline"
+	"github.com/KatyarAILabs/trajectory/importers"
+	"github.com/KatyarAILabs/trajectory/pkg/record"
 )
 
 // ImportResult summarises what an import produced.

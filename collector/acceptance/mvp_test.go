@@ -19,11 +19,11 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/trajectory-project/trajectory/collector/config"
-	"github.com/trajectory-project/trajectory/collector/pipeline"
-	"github.com/trajectory-project/trajectory/collector/service"
-	v1 "github.com/trajectory-project/trajectory/gen/go/trajectory/v1"
-	"github.com/trajectory-project/trajectory/pkg/record"
+	"github.com/KatyarAILabs/trajectory/collector/config"
+	"github.com/KatyarAILabs/trajectory/collector/pipeline"
+	"github.com/KatyarAILabs/trajectory/collector/service"
+	v1 "github.com/KatyarAILabs/trajectory/gen/go/trajectory/v1"
+	"github.com/KatyarAILabs/trajectory/pkg/record"
 )
 
 // runService starts a service and returns a stop function that drains it.

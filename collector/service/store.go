@@ -7,8 +7,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/trajectory-project/trajectory/collector/config"
-	"github.com/trajectory-project/trajectory/collector/sink/objstore"
+	"github.com/KatyarAILabs/trajectory/collector/config"
+	"github.com/KatyarAILabs/trajectory/collector/sink/objstore"
 )
 
 // newStore builds the object store a sink writes to.

@@ -14,15 +14,15 @@ import (
 
 	"github.com/parquet-go/parquet-go"
 
-	"github.com/trajectory-project/trajectory/collector/sink/lake"
-	"github.com/trajectory-project/trajectory/collector/sink/objstore"
-	"github.com/trajectory-project/trajectory/collector/wire"
-	"github.com/trajectory-project/trajectory/pkg/export"
-	"github.com/trajectory-project/trajectory/pkg/join"
-	"github.com/trajectory-project/trajectory/pkg/lakeread"
-	"github.com/trajectory-project/trajectory/pkg/record"
-	"github.com/trajectory-project/trajectory/pkg/scorer"
-	"github.com/trajectory-project/trajectory/pkg/scorer/rules"
+	"github.com/KatyarAILabs/trajectory/collector/sink/lake"
+	"github.com/KatyarAILabs/trajectory/collector/sink/objstore"
+	"github.com/KatyarAILabs/trajectory/collector/wire"
+	"github.com/KatyarAILabs/trajectory/pkg/export"
+	"github.com/KatyarAILabs/trajectory/pkg/join"
+	"github.com/KatyarAILabs/trajectory/pkg/lakeread"
+	"github.com/KatyarAILabs/trajectory/pkg/record"
+	"github.com/KatyarAILabs/trajectory/pkg/scorer"
+	"github.com/KatyarAILabs/trajectory/pkg/scorer/rules"
 )
 
 // joinFlags are shared by join, score and export, so all three answer the same

@@ -20,7 +20,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/trajectory-project/trajectory/collector/pipeline"
+	"github.com/KatyarAILabs/trajectory/collector/pipeline"
 )
 
 // An Importer reads an export format and emits envelopes.

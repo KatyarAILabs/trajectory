@@ -13,11 +13,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/trajectory-project/trajectory/collector/buffer"
-	"github.com/trajectory-project/trajectory/collector/pipeline"
-	"github.com/trajectory-project/trajectory/collector/sink/lake"
-	"github.com/trajectory-project/trajectory/collector/sink/objstore"
-	"github.com/trajectory-project/trajectory/pkg/record"
+	"github.com/KatyarAILabs/trajectory/collector/buffer"
+	"github.com/KatyarAILabs/trajectory/collector/pipeline"
+	"github.com/KatyarAILabs/trajectory/collector/sink/lake"
+	"github.com/KatyarAILabs/trajectory/collector/sink/objstore"
+	"github.com/KatyarAILabs/trajectory/pkg/record"
 )
 
 // flakyStore fails a configurable number of writes, then succeeds. It stands in

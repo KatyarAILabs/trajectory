@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 SHELL := /bin/bash
-MODULE := github.com/trajectory-project/trajectory
+MODULE := github.com/KatyarAILabs/trajectory
 BIN := $(CURDIR)/bin
 PROTOS := $(shell find spec/proto -name '*.proto')
 

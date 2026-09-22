@@ -18,7 +18,7 @@ processors:
   - gomod: go.opentelemetry.io/collector/processor/memorylimiterprocessor v0.161.0
 
 exporters:
-  - gomod: github.com/trajectory-project/trajectory/otelcol/trajectoryexporter v0.1.0
+  - gomod: github.com/KatyarAILabs/trajectory/otelcol/trajectoryexporter v0.1.0
   - gomod: go.opentelemetry.io/collector/exporter/debugexporter v0.161.0
 
 # Resolve both modules from this checkout while they are unpublished.
@@ -26,5 +26,5 @@ exporters:
 # (otelcol/dist/trajectory-otelcol), not to this file. Build from otelcol/:
 #   mkdir -p dist && builder --config builder-config.yaml
 replaces:
-  - github.com/trajectory-project/trajectory => ../../..
-  - github.com/trajectory-project/trajectory/otelcol/trajectoryexporter => ../../trajectoryexporter
+  - github.com/KatyarAILabs/trajectory => ../../..
+  - github.com/KatyarAILabs/trajectory/otelcol/trajectoryexporter => ../../trajectoryexporter

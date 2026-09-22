@@ -10,8 +10,8 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/trajectory-project/trajectory/collector/pipeline"
-	v1 "github.com/trajectory-project/trajectory/gen/go/trajectory/v1"
+	"github.com/KatyarAILabs/trajectory/collector/pipeline"
+	v1 "github.com/KatyarAILabs/trajectory/gen/go/trajectory/v1"
 )
 
 // SpanRecord is the JSON shape of one observation for POST /v1/spans (§9.2).

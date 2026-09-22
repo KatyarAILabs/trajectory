@@ -4,9 +4,9 @@
 package assemble
 
 import (
-	"github.com/trajectory-project/trajectory/collector/pipeline"
-	"github.com/trajectory-project/trajectory/internal/version"
-	"github.com/trajectory-project/trajectory/pkg/record"
+	"github.com/KatyarAILabs/trajectory/collector/pipeline"
+	"github.com/KatyarAILabs/trajectory/internal/version"
+	"github.com/KatyarAILabs/trajectory/pkg/record"
 )
 
 // patchFor builds an append-only patch record for a span that arrived after

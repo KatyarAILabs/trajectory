@@ -24,8 +24,8 @@ import (
 	"cel.dev/cel-go/common/types/ref"
 	"cel.dev/cel-go/common/types/traits"
 
-	"github.com/trajectory-project/trajectory/collector/config"
-	"github.com/trajectory-project/trajectory/collector/pipeline"
+	"github.com/KatyarAILabs/trajectory/collector/config"
+	"github.com/KatyarAILabs/trajectory/collector/pipeline"
 )
 
 // Reasons recorded in Episode.sampled_by (F-7.4), so a consumer can reason

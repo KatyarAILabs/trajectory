@@ -1,7 +1,7 @@
 {
-  "batch_id": "01M31RA1HSGDK8N0SWWFVZAXFM",
+  "batch_id": "01M344EGBVCAWKBPFEK7D1D3VB",
   "schema_version": "0.2.0",
-  "written_at": "2026-09-21T10:31:10Z",
+  "written_at": "2026-09-22T08:41:48Z",
   "collector": {
     "version": "dev",
     "instance": "apples-MacBook-Pro.local"
@@ -12,7 +12,7 @@
   },
   "files": [
     {
-      "path": "rewards/dt=2026-09-21/part-01M31RA1HSGDK8N0SWWFVZAXFM.parquet",
+      "path": "rewards/dt=2026-09-22/part-01M344EGBVCAWKBPFEK7D1D3VB.parquet",
       "rows": 1,
       "bytes": 2126,
       "table": "rewards"

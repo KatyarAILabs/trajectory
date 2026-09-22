@@ -7,8 +7,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/trajectory-project/trajectory/pkg/record"
-	"github.com/trajectory-project/trajectory/pkg/scorer"
+	"github.com/KatyarAILabs/trajectory/pkg/record"
+	"github.com/KatyarAILabs/trajectory/pkg/scorer"
 )
 
 const refund = `

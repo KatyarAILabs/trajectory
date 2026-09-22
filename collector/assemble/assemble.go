@@ -20,8 +20,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/trajectory-project/trajectory/collector/pipeline"
-	"github.com/trajectory-project/trajectory/pkg/record"
+	"github.com/KatyarAILabs/trajectory/collector/pipeline"
+	"github.com/KatyarAILabs/trajectory/pkg/record"
 )
 
 // Emit receives a completed episode. It is called without the assembler lock

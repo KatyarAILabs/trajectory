@@ -6,7 +6,7 @@ package normalize
 import (
 	"encoding/json"
 
-	"github.com/trajectory-project/trajectory/pkg/record"
+	"github.com/KatyarAILabs/trajectory/pkg/record"
 )
 
 // invocationParams mirrors the JSON object OpenInference puts in

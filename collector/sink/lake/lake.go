@@ -29,9 +29,9 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
-	"github.com/trajectory-project/trajectory/collector/pipeline"
-	"github.com/trajectory-project/trajectory/collector/sink/objstore"
-	"github.com/trajectory-project/trajectory/pkg/record"
+	"github.com/KatyarAILabs/trajectory/collector/pipeline"
+	"github.com/KatyarAILabs/trajectory/collector/sink/objstore"
+	"github.com/KatyarAILabs/trajectory/pkg/record"
 )
 
 // Options configure a Sink.

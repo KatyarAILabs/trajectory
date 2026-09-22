@@ -1,4 +1,4 @@
-module github.com/trajectory-project/trajectory
+module github.com/KatyarAILabs/trajectory
 
 go 1.26.0
 

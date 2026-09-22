@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/trajectory-project/trajectory/internal/version"
+	"github.com/KatyarAILabs/trajectory/internal/version"
 )
 
 // Validate reports every problem it can find, not just the first, so a user

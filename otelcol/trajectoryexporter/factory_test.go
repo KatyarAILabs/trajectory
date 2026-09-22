@@ -13,7 +13,7 @@ import (
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/exporter/exportertest"
 
-	"github.com/trajectory-project/trajectory/collector/acceptance"
+	"github.com/KatyarAILabs/trajectory/collector/acceptance"
 )
 
 func settings(dir string) map[string]any {

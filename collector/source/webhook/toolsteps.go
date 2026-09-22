@@ -6,8 +6,8 @@ package webhook
 import (
 	"encoding/json"
 
-	"github.com/trajectory-project/trajectory/collector/pipeline"
-	"github.com/trajectory-project/trajectory/pkg/record"
+	"github.com/KatyarAILabs/trajectory/collector/pipeline"
+	"github.com/KatyarAILabs/trajectory/pkg/record"
 )
 
 // toolStepsFromMessages rebuilds tool steps from OpenAI-format history.

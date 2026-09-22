@@ -12,11 +12,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/trajectory-project/trajectory/collector/config"
-	"github.com/trajectory-project/trajectory/collector/pipeline"
-	"github.com/trajectory-project/trajectory/collector/service"
-	"github.com/trajectory-project/trajectory/importers"
-	"github.com/trajectory-project/trajectory/pkg/record"
+	"github.com/KatyarAILabs/trajectory/collector/config"
+	"github.com/KatyarAILabs/trajectory/collector/pipeline"
+	"github.com/KatyarAILabs/trajectory/collector/service"
+	"github.com/KatyarAILabs/trajectory/importers"
+	"github.com/KatyarAILabs/trajectory/pkg/record"
 )
 
 // UC-4, end to end: a design partner evaluates the collector against their own

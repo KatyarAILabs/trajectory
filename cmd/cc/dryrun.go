@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/trajectory-project/trajectory/collector/config"
-	"github.com/trajectory-project/trajectory/collector/pipeline"
-	"github.com/trajectory-project/trajectory/collector/service"
-	"github.com/trajectory-project/trajectory/collector/wire"
-	"github.com/trajectory-project/trajectory/pkg/record"
+	"github.com/KatyarAILabs/trajectory/collector/config"
+	"github.com/KatyarAILabs/trajectory/collector/pipeline"
+	"github.com/KatyarAILabs/trajectory/collector/service"
+	"github.com/KatyarAILabs/trajectory/collector/wire"
+	"github.com/KatyarAILabs/trajectory/pkg/record"
 )
 
 // dryRun implements `cc validate -sample` (F-11.3): what would this config do

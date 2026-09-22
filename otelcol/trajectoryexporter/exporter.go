@@ -13,9 +13,9 @@ import (
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 
-	"github.com/trajectory-project/trajectory/collector/config"
-	"github.com/trajectory-project/trajectory/collector/normalize"
-	"github.com/trajectory-project/trajectory/collector/service"
+	"github.com/KatyarAILabs/trajectory/collector/config"
+	"github.com/KatyarAILabs/trajectory/collector/normalize"
+	"github.com/KatyarAILabs/trajectory/collector/service"
 )
 
 // Exporter runs the trajectory pipeline inside an OTel Collector.

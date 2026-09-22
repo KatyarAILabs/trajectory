@@ -15,7 +15,7 @@ import (
 
 	"go.opentelemetry.io/collector/pdata/ptrace/ptraceotlp"
 
-	"github.com/trajectory-project/trajectory/collector/pipeline"
+	"github.com/KatyarAILabs/trajectory/collector/pipeline"
 )
 
 // traceService implements the OTLP trace export service over gRPC (F-1.1).

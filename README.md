@@ -47,7 +47,7 @@ Measured, not claimed — reproduce with `make loadtest`:
 | Durable assembly state (F-3.8) | Best-effort in v1 by Q-8. Loss on an unclean stop is bounded and counted. |
 | 24-hour soak at 2× load (§15) | Needs CI hardware. Only a 25-second run has been done. |
 | A week unattended at a design partner (M3) | Needs a design partner. |
-| Published packages | Nothing is on PyPI, npm or a container registry yet, and the module path `github.com/trajectory-project/trajectory` is a placeholder. |
+| Published packages | Nothing is on PyPI, npm or a container registry yet. |
 
 ## Try it
 

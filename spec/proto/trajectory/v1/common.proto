@@ -5,7 +5,7 @@ syntax = "proto3";
 
 package trajectory.v1;
 
-option go_package = "github.com/trajectory-project/trajectory/gen/go/trajectory/v1;trajectoryv1";
+option go_package = "github.com/KatyarAILabs/trajectory/gen/go/trajectory/v1;trajectoryv1";
 
 // Error is a terminal error attached to an episode or a step.
 message Error {

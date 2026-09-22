@@ -20,8 +20,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/trajectory-project/trajectory/collector/pipeline"
-	"github.com/trajectory-project/trajectory/pkg/record"
+	"github.com/KatyarAILabs/trajectory/collector/pipeline"
+	"github.com/KatyarAILabs/trajectory/pkg/record"
 )
 
 // Span is the convention-agnostic input to normalisation. Sources flatten

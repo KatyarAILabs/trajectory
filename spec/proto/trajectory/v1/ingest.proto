@@ -15,7 +15,7 @@ import "trajectory/v1/common.proto";
 import "trajectory/v1/episode.proto";
 import "trajectory/v1/step.proto";
 
-option go_package = "github.com/trajectory-project/trajectory/gen/go/trajectory/v1;trajectoryv1";
+option go_package = "github.com/KatyarAILabs/trajectory/gen/go/trajectory/v1;trajectoryv1";
 
 // EpisodeWithSteps is one complete episode as a producer emits it (§9.1).
 // Steps are nested here and split into their own table on write.

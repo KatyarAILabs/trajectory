@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/trajectory-project/trajectory/pkg/record"
+	"github.com/KatyarAILabs/trajectory/pkg/record"
 )
 
 var keyOrder = []string{"session.id", "gen_ai.conversation.id", "trace_id"}

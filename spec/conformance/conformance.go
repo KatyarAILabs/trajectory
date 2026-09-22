@@ -25,7 +25,7 @@ import (
 
 	"github.com/parquet-go/parquet-go"
 
-	"github.com/trajectory-project/trajectory/pkg/record"
+	"github.com/KatyarAILabs/trajectory/pkg/record"
 )
 
 // Result is the outcome of one check.

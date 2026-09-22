@@ -6,9 +6,9 @@ package assemble
 import (
 	"sort"
 
-	"github.com/trajectory-project/trajectory/collector/pipeline"
-	"github.com/trajectory-project/trajectory/internal/version"
-	"github.com/trajectory-project/trajectory/pkg/record"
+	"github.com/KatyarAILabs/trajectory/collector/pipeline"
+	"github.com/KatyarAILabs/trajectory/internal/version"
+	"github.com/KatyarAILabs/trajectory/pkg/record"
 )
 
 // closeLocked finalises an in-flight episode and removes it from the open set.

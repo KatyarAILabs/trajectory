@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/trajectory-project/trajectory/collector/config"
-	"github.com/trajectory-project/trajectory/collector/extract"
-	"github.com/trajectory-project/trajectory/collector/redact"
-	"github.com/trajectory-project/trajectory/collector/sample"
+	"github.com/KatyarAILabs/trajectory/collector/config"
+	"github.com/KatyarAILabs/trajectory/collector/extract"
+	"github.com/KatyarAILabs/trajectory/collector/redact"
+	"github.com/KatyarAILabs/trajectory/collector/sample"
 )
 
 // policy is every setting that decides what happens to a record, as opposed to

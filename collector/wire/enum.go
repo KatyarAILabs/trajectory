@@ -16,7 +16,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/trajectory-project/trajectory/pkg/record"
+	"github.com/KatyarAILabs/trajectory/pkg/record"
 )
 
 // enumSet is one canonical vocabulary plus the prefix its protobuf names use.

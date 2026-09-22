@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/trajectory-project/trajectory/pkg/record"
+	"github.com/KatyarAILabs/trajectory/pkg/record"
 )
 
 // F-10.3: the published JSON Schema advertises both the protobuf JSON names

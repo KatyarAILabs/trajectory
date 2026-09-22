@@ -3,7 +3,7 @@
 
 package record
 
-import v1 "github.com/trajectory-project/trajectory/gen/go/trajectory/v1"
+import v1 "github.com/KatyarAILabs/trajectory/gen/go/trajectory/v1"
 
 // Enums are stored in Parquet as their spec §7 string values, not as the
 // proto's prefixed names, so a file is readable in DuckDB without a mapping

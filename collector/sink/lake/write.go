@@ -18,9 +18,9 @@ import (
 
 	"github.com/parquet-go/parquet-go"
 
-	"github.com/trajectory-project/trajectory/collector/pipeline"
-	"github.com/trajectory-project/trajectory/internal/version"
-	"github.com/trajectory-project/trajectory/pkg/record"
+	"github.com/KatyarAILabs/trajectory/collector/pipeline"
+	"github.com/KatyarAILabs/trajectory/internal/version"
+	"github.com/KatyarAILabs/trajectory/pkg/record"
 )
 
 // Manifest is written last and lists everything in the batch (F-9.6).

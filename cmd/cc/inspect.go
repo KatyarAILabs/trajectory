@@ -15,7 +15,7 @@ import (
 
 	"github.com/parquet-go/parquet-go"
 
-	"github.com/trajectory-project/trajectory/pkg/record"
+	"github.com/KatyarAILabs/trajectory/pkg/record"
 )
 
 // cmdInspect implements F-14.4: summarise a Parquet file or blob without a

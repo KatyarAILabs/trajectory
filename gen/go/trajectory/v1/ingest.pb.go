@@ -344,7 +344,7 @@ const file_trajectory_v1_ingest_proto_rawDesc = "" +
 	"\x18_instrumentation_versionB\x10\n" +
 	"\x0e_episode_error\"<\n" +
 	"\tSpanBatch\x12/\n" +
-	"\x05spans\x18\x01 \x03(\v2\x19.trajectory.v1.SpanRecordR\x05spansBLZJgithub.com/trajectory-project/trajectory/gen/go/trajectory/v1;trajectoryv1b\x06proto3"
+	"\x05spans\x18\x01 \x03(\v2\x19.trajectory.v1.SpanRecordR\x05spansBFZDgithub.com/KatyarAILabs/trajectory/gen/go/trajectory/v1;trajectoryv1b\x06proto3"
 
 var (
 	file_trajectory_v1_ingest_proto_rawDescOnce sync.Once

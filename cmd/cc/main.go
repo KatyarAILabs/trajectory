@@ -17,10 +17,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/trajectory-project/trajectory/collector/config"
-	"github.com/trajectory-project/trajectory/collector/service"
-	"github.com/trajectory-project/trajectory/collector/telemetry"
-	"github.com/trajectory-project/trajectory/internal/version"
+	"github.com/KatyarAILabs/trajectory/collector/config"
+	"github.com/KatyarAILabs/trajectory/collector/service"
+	"github.com/KatyarAILabs/trajectory/collector/telemetry"
+	"github.com/KatyarAILabs/trajectory/internal/version"
 )
 
 func main() {

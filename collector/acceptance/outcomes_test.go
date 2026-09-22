@@ -14,16 +14,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/trajectory-project/trajectory/collector/config"
-	"github.com/trajectory-project/trajectory/collector/sink/lake"
-	"github.com/trajectory-project/trajectory/collector/sink/objstore"
-	"github.com/trajectory-project/trajectory/pkg/export"
-	"github.com/trajectory-project/trajectory/pkg/join"
-	"github.com/trajectory-project/trajectory/pkg/lakeread"
-	"github.com/trajectory-project/trajectory/pkg/record"
-	"github.com/trajectory-project/trajectory/pkg/scorer"
-	"github.com/trajectory-project/trajectory/pkg/scorer/rules"
-	"github.com/trajectory-project/trajectory/spec/conformance"
+	"github.com/KatyarAILabs/trajectory/collector/config"
+	"github.com/KatyarAILabs/trajectory/collector/sink/lake"
+	"github.com/KatyarAILabs/trajectory/collector/sink/objstore"
+	"github.com/KatyarAILabs/trajectory/pkg/export"
+	"github.com/KatyarAILabs/trajectory/pkg/join"
+	"github.com/KatyarAILabs/trajectory/pkg/lakeread"
+	"github.com/KatyarAILabs/trajectory/pkg/record"
+	"github.com/KatyarAILabs/trajectory/pkg/scorer"
+	"github.com/KatyarAILabs/trajectory/pkg/scorer/rules"
+	"github.com/KatyarAILabs/trajectory/spec/conformance"
 )
 
 // The outcome join, end to end: capture → outcomes → join → score → export.

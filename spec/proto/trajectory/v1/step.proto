@@ -7,7 +7,7 @@ package trajectory.v1;
 
 import "trajectory/v1/common.proto";
 
-option go_package = "github.com/trajectory-project/trajectory/gen/go/trajectory/v1;trajectoryv1";
+option go_package = "github.com/KatyarAILabs/trajectory/gen/go/trajectory/v1;trajectoryv1";
 
 // Kind classifies a step. Unknown span kinds normalise to KIND_OTHER rather
 // than being dropped (F-2.5).

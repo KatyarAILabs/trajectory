@@ -406,7 +406,7 @@ const file_trajectory_v1_step_proto_rawDesc = "" +
 	"\n" +
 	"KIND_HUMAN\x10\x04\x12\x0e\n" +
 	"\n" +
-	"KIND_OTHER\x10\x05BLZJgithub.com/trajectory-project/trajectory/gen/go/trajectory/v1;trajectoryv1b\x06proto3"
+	"KIND_OTHER\x10\x05BFZDgithub.com/KatyarAILabs/trajectory/gen/go/trajectory/v1;trajectoryv1b\x06proto3"
 
 var (
 	file_trajectory_v1_step_proto_rawDescOnce sync.Once

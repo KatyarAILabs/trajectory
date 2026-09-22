@@ -6,7 +6,7 @@ package service
 import (
 	"golang.org/x/time/rate"
 
-	"github.com/trajectory-project/trajectory/collector/config"
+	"github.com/KatyarAILabs/trajectory/collector/config"
 )
 
 // quotas holds a token bucket per source (F-7.3).

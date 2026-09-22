@@ -361,7 +361,7 @@ const file_trajectory_v1_reserved_proto_rawDesc = "" +
 	"\x02at\x18\x06 \x01(\x03R\x02at\x1a:\n" +
 	"\fClausesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\x01R\x05value:\x028\x01BLZJgithub.com/trajectory-project/trajectory/gen/go/trajectory/v1;trajectoryv1b\x06proto3"
+	"\x05value\x18\x02 \x01(\x01R\x05value:\x028\x01BFZDgithub.com/KatyarAILabs/trajectory/gen/go/trajectory/v1;trajectoryv1b\x06proto3"
 
 var (
 	file_trajectory_v1_reserved_proto_rawDescOnce sync.Once

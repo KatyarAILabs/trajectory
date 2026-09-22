@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/trajectory-project/trajectory/pkg/lakeread"
-	"github.com/trajectory-project/trajectory/pkg/record"
+	"github.com/KatyarAILabs/trajectory/pkg/lakeread"
+	"github.com/KatyarAILabs/trajectory/pkg/record"
 )
 
 var t0 = time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)

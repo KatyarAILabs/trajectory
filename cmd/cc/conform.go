@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/trajectory-project/trajectory/spec/conformance"
+	"github.com/KatyarAILabs/trajectory/spec/conformance"
 )
 
 // cmdConform implements the conformance suite as a command (F-10.3, §18).

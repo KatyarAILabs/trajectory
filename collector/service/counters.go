@@ -3,7 +3,7 @@
 
 package service
 
-import "github.com/trajectory-project/trajectory/collector/redact"
+import "github.com/KatyarAILabs/trajectory/collector/redact"
 
 // rejectingSource is implemented by sources that refuse requests at the door.
 type rejectingSource interface {

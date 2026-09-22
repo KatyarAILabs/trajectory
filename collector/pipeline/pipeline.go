@@ -14,7 +14,7 @@ package pipeline
 import (
 	"context"
 
-	"github.com/trajectory-project/trajectory/pkg/record"
+	"github.com/KatyarAILabs/trajectory/pkg/record"
 )
 
 // EpisodeMeta is episode-level context carried on an individual observation.

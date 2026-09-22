@@ -12,7 +12,7 @@ import (
 
 	"github.com/parquet-go/parquet-go"
 
-	"github.com/trajectory-project/trajectory/pkg/record"
+	"github.com/KatyarAILabs/trajectory/pkg/record"
 )
 
 func writeParquet[T any](t *testing.T, path string, rows []T) {

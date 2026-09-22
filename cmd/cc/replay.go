@@ -14,7 +14,7 @@ import (
 
 	"github.com/parquet-go/parquet-go"
 
-	"github.com/trajectory-project/trajectory/pkg/record"
+	"github.com/KatyarAILabs/trajectory/pkg/record"
 )
 
 // cmdReplay implements F-14.6: print a reconstructed episode as readable text.

@@ -173,7 +173,7 @@ const file_trajectory_v1_blob_proto_rawDesc = "" +
 	"\x14ENCODING_UNSPECIFIED\x10\x00\x12\x11\n" +
 	"\rENCODING_UTF8\x10\x01\x12\x13\n" +
 	"\x0fENCODING_BASE64\x10\x02\x12\x11\n" +
-	"\rENCODING_ZSTD\x10\x03BLZJgithub.com/trajectory-project/trajectory/gen/go/trajectory/v1;trajectoryv1b\x06proto3"
+	"\rENCODING_ZSTD\x10\x03BFZDgithub.com/KatyarAILabs/trajectory/gen/go/trajectory/v1;trajectoryv1b\x06proto3"
 
 var (
 	file_trajectory_v1_blob_proto_rawDescOnce sync.Once

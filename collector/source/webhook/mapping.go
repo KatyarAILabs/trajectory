@@ -12,7 +12,7 @@ import (
 	"github.com/ohler55/ojg/jp"
 	"gopkg.in/yaml.v3"
 
-	"github.com/trajectory-project/trajectory/pkg/record"
+	"github.com/KatyarAILabs/trajectory/pkg/record"
 )
 
 // Mapping is a declarative gateway mapping file (F-1.3, F-2.4).

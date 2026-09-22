@@ -8,8 +8,8 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	v1 "github.com/trajectory-project/trajectory/gen/go/trajectory/v1"
-	"github.com/trajectory-project/trajectory/pkg/record"
+	v1 "github.com/KatyarAILabs/trajectory/gen/go/trajectory/v1"
+	"github.com/KatyarAILabs/trajectory/pkg/record"
 )
 
 // DecodeEpisodesProto parses a protobuf EpisodeBatch (F-1.2).

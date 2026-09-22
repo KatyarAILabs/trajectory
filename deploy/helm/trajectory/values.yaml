@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 image:
-  repository: ghcr.io/trajectory-project/trajectory
+  repository: ghcr.io/katyarailabs/trajectory
   tag: ""          # defaults to .Chart.AppVersion
   pullPolicy: IfNotPresent
 

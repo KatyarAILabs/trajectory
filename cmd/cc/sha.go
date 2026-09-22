@@ -7,7 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 
-	"github.com/trajectory-project/trajectory/internal/version"
+	"github.com/KatyarAILabs/trajectory/internal/version"
 )
 
 func sha256Hex(b []byte) string {

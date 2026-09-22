@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/trajectory-project/trajectory/collector/config"
+	"github.com/KatyarAILabs/trajectory/collector/config"
 )
 
 // Reload applies a new configuration without dropping in-flight data (F-11.4).

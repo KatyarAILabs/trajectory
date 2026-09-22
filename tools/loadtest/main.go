@@ -32,7 +32,7 @@ import (
 
 	"go.opentelemetry.io/collector/pdata/ptrace/ptraceotlp"
 
-	"github.com/trajectory-project/trajectory/collector/acceptance"
+	"github.com/KatyarAILabs/trajectory/collector/acceptance"
 )
 
 func main() {

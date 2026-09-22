@@ -6,9 +6,9 @@ type: application
 kubeVersion: ">=1.30.0-0"
 version: 0.1.0
 appVersion: "0.1.0"
-home: https://github.com/trajectory-project/trajectory
+home: https://github.com/KatyarAILabs/trajectory
 sources:
-  - https://github.com/trajectory-project/trajectory
+  - https://github.com/KatyarAILabs/trajectory
 keywords:
   - observability
   - llm

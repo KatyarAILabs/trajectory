@@ -326,7 +326,7 @@ const file_trajectory_v1_episode_proto_rawDesc = "" +
 	"\x0fSTATUS_COMPLETE\x10\x01\x12\x14\n" +
 	"\x10STATUS_TIMED_OUT\x10\x02\x12\x12\n" +
 	"\x0eSTATUS_EVICTED\x10\x03\x12\x12\n" +
-	"\x0eSTATUS_PATCHED\x10\x04BLZJgithub.com/trajectory-project/trajectory/gen/go/trajectory/v1;trajectoryv1b\x06proto3"
+	"\x0eSTATUS_PATCHED\x10\x04BFZDgithub.com/KatyarAILabs/trajectory/gen/go/trajectory/v1;trajectoryv1b\x06proto3"
 
 var (
 	file_trajectory_v1_episode_proto_rawDescOnce sync.Once

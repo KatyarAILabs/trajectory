@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/trajectory-project/trajectory/collector/pipeline"
-	"github.com/trajectory-project/trajectory/pkg/record"
+	"github.com/KatyarAILabs/trajectory/collector/pipeline"
+	"github.com/KatyarAILabs/trajectory/pkg/record"
 )
 
 // Int64 accepts a 64-bit integer as either a JSON number or a JSON string.

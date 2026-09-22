@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	v1 "github.com/trajectory-project/trajectory/gen/go/trajectory/v1"
+	v1 "github.com/KatyarAILabs/trajectory/gen/go/trajectory/v1"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )

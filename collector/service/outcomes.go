@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/trajectory-project/trajectory/collector/wire"
-	"github.com/trajectory-project/trajectory/pkg/record"
+	"github.com/KatyarAILabs/trajectory/collector/wire"
+	"github.com/KatyarAILabs/trajectory/pkg/record"
 )
 
 // bufferedRecord is what the disk buffer holds. An episode is written as its

@@ -18,7 +18,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/trajectory-project/trajectory/collector/tlsconf"
+	"github.com/KatyarAILabs/trajectory/collector/tlsconf"
 )
 
 // Config is the whole configuration surface the walking skeleton supports.

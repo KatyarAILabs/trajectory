@@ -11,9 +11,9 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/trajectory-project/trajectory/collector/config"
-	"github.com/trajectory-project/trajectory/collector/service"
-	"github.com/trajectory-project/trajectory/importers"
+	"github.com/KatyarAILabs/trajectory/collector/config"
+	"github.com/KatyarAILabs/trajectory/collector/service"
+	"github.com/KatyarAILabs/trajectory/importers"
 )
 
 // cmdImport implements F-14.3 / UC-4: backfill a historical export into the

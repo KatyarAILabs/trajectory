@@ -7,7 +7,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/trajectory-project/trajectory/pkg/record"
+	"github.com/KatyarAILabs/trajectory/pkg/record"
 )
 
 // completedScorer is the smallest useful verifier: did the trajectory finish

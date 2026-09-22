@@ -10,9 +10,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/trajectory-project/trajectory/collector/config"
-	"github.com/trajectory-project/trajectory/collector/service"
-	"github.com/trajectory-project/trajectory/collector/wire"
+	"github.com/KatyarAILabs/trajectory/collector/config"
+	"github.com/KatyarAILabs/trajectory/collector/service"
+	"github.com/KatyarAILabs/trajectory/collector/wire"
 )
 
 // cmdOutcomes loads business outcomes from a file (§9.4).

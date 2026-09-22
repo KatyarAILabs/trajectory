@@ -27,7 +27,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/trajectory-project/trajectory/internal/version"
+	"github.com/KatyarAILabs/trajectory/internal/version"
 )
 
 // Metrics holds every collector metric from §11 that Phase 1 can move.

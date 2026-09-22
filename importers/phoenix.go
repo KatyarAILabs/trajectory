@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/trajectory-project/trajectory/collector/normalize"
-	"github.com/trajectory-project/trajectory/collector/pipeline"
+	"github.com/KatyarAILabs/trajectory/collector/normalize"
+	"github.com/KatyarAILabs/trajectory/collector/pipeline"
 )
 
 func init() { register(&Phoenix{}) }

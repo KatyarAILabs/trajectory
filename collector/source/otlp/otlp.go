@@ -25,8 +25,8 @@ import (
 	"go.opentelemetry.io/collector/pdata/ptrace"
 	"go.opentelemetry.io/collector/pdata/ptrace/ptraceotlp"
 
-	"github.com/trajectory-project/trajectory/collector/normalize"
-	"github.com/trajectory-project/trajectory/collector/pipeline"
+	"github.com/KatyarAILabs/trajectory/collector/normalize"
+	"github.com/KatyarAILabs/trajectory/collector/pipeline"
 )
 
 // Options configure a Receiver.

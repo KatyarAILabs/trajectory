@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/trajectory-project/trajectory/collector/config"
-	"github.com/trajectory-project/trajectory/collector/pipeline"
-	"github.com/trajectory-project/trajectory/collector/redact"
-	"github.com/trajectory-project/trajectory/pkg/record"
+	"github.com/KatyarAILabs/trajectory/collector/config"
+	"github.com/KatyarAILabs/trajectory/collector/pipeline"
+	"github.com/KatyarAILabs/trajectory/collector/redact"
+	"github.com/KatyarAILabs/trajectory/pkg/record"
 )
 
 // DryRunResult is what a config would do to one sample episode (F-11.3).

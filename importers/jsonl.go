@@ -10,8 +10,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/trajectory-project/trajectory/collector/pipeline"
-	"github.com/trajectory-project/trajectory/collector/wire"
+	"github.com/KatyarAILabs/trajectory/collector/pipeline"
+	"github.com/KatyarAILabs/trajectory/collector/wire"
 )
 
 func init() {

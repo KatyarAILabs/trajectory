@@ -4,8 +4,8 @@
 package redact
 
 import (
-	"github.com/trajectory-project/trajectory/collector/pipeline"
-	"github.com/trajectory-project/trajectory/pkg/record"
+	"github.com/KatyarAILabs/trajectory/collector/pipeline"
+	"github.com/KatyarAILabs/trajectory/pkg/record"
 )
 
 // cloneAssembled deep-copies the parts of an episode that redaction mutates,

@@ -1,9 +1,9 @@
-module github.com/trajectory-project/trajectory/otelcol/trajectoryexporter
+module github.com/KatyarAILabs/trajectory/otelcol/trajectoryexporter
 
 go 1.26.0
 
 require (
-	github.com/trajectory-project/trajectory v0.0.0
+	github.com/KatyarAILabs/trajectory v0.0.0
 	go.opentelemetry.io/collector/component v1.67.0
 	go.opentelemetry.io/collector/component/componenttest v0.161.0
 	go.opentelemetry.io/collector/config/configoptional v1.67.0
@@ -114,4 +114,4 @@ require (
 	google.golang.org/protobuf v1.36.12 // indirect
 )
 
-replace github.com/trajectory-project/trajectory => ../..
+replace github.com/KatyarAILabs/trajectory => ../..

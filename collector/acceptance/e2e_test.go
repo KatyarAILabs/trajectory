@@ -19,10 +19,10 @@ import (
 	"github.com/parquet-go/parquet-go"
 	"go.opentelemetry.io/collector/pdata/ptrace/ptraceotlp"
 
-	"github.com/trajectory-project/trajectory/collector/config"
-	"github.com/trajectory-project/trajectory/collector/service"
-	"github.com/trajectory-project/trajectory/collector/sink/lake"
-	"github.com/trajectory-project/trajectory/pkg/record"
+	"github.com/KatyarAILabs/trajectory/collector/config"
+	"github.com/KatyarAILabs/trajectory/collector/service"
+	"github.com/KatyarAILabs/trajectory/collector/sink/lake"
+	"github.com/KatyarAILabs/trajectory/pkg/record"
 )
 
 // TestDoD1 is the Phase 1 exit criterion.

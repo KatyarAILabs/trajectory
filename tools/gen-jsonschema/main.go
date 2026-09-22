@@ -18,8 +18,8 @@ import (
 	"os"
 	"path/filepath"
 
-	v1 "github.com/trajectory-project/trajectory/gen/go/trajectory/v1"
-	"github.com/trajectory-project/trajectory/internal/version"
+	v1 "github.com/KatyarAILabs/trajectory/gen/go/trajectory/v1"
+	"github.com/KatyarAILabs/trajectory/internal/version"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )

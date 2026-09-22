@@ -18,7 +18,7 @@ package scorer
 import (
 	"context"
 
-	"github.com/trajectory-project/trajectory/pkg/record"
+	"github.com/KatyarAILabs/trajectory/pkg/record"
 )
 
 // Episode is one trajectory as a scorer sees it: the episode record and its

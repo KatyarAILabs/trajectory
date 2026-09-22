@@ -11,7 +11,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/trajectory-project/trajectory/collector/pipeline"
+	"github.com/KatyarAILabs/trajectory/collector/pipeline"
 )
 
 func spanLine(session, span string) string {

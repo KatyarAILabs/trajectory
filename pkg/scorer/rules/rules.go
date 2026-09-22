@@ -23,8 +23,8 @@ import (
 	"cel.dev/cel-go/common/types/traits"
 	"gopkg.in/yaml.v3"
 
-	"github.com/trajectory-project/trajectory/pkg/record"
-	"github.com/trajectory-project/trajectory/pkg/scorer"
+	"github.com/KatyarAILabs/trajectory/pkg/record"
+	"github.com/KatyarAILabs/trajectory/pkg/scorer"
 )
 
 // Config is the YAML shape of a rules scorer.

@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/trajectory-readme-banner-dark.png">
+  <img alt="Trajectory — capture every agent trajectory at training fidelity. An open-source project by katyar." src="docs/assets/trajectory-readme-banner-light.png">
+</picture>
+
 # Trajectory
 
 Capture agent trajectories at a fidelity sufficient for offline replay and

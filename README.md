@@ -68,6 +68,38 @@ content-addressed blob; a seeded email present only as its HMAC token, with the
 same token in both steps that touched it, so it is still joinable; and the
 ticket id extracted into `entity_keys`.
 
+### Container images
+
+Every merge to `main` and every release tag publishes multi-arch
+(amd64/arm64), Sigstore-signed images:
+
+```sh
+docker pull ghcr.io/katyarailabs/trajectory:main          # standalone collector
+docker pull ghcr.io/katyarailabs/trajectory-otelcol:main  # OTel Collector + trajectory exporter
+```
+
+Releases are tagged `:1.2.3`, `:1.2` and `:latest`; every build is also
+tagged `:sha-<commit>`. The image reads its config from
+`/etc/cc/config.yaml` and buffers to a volume at `/var/lib/cc`, so a config
+for it listens on `0.0.0.0` and sets `buffer.dir: /var/lib/cc`
+(`examples/local.yaml` binds to localhost and is for running the binary
+directly):
+
+```sh
+docker run --rm -p 4318:4318 -p 4319:4319 \
+  -v "$PWD/config.yaml:/etc/cc/config.yaml:ro" \
+  -v cc-buffer:/var/lib/cc \
+  ghcr.io/katyarailabs/trajectory:main
+```
+
+Verify a signature:
+
+```sh
+cosign verify ghcr.io/katyarailabs/trajectory:main \
+  --certificate-identity-regexp 'https://github.com/KatyarAILabs/trajectory/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
 ## Why
 
 Teams running production agents already emit telemetry, but what they keep is

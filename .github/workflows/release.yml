@@ -75,8 +75,12 @@ jobs:
       - uses: anchore/sbom-action@v0
         with:
           format: spdx-json
-          artifact-name: trajectory-sbom.spdx.json
           output-file: trajectory-sbom.spdx.json
+          # The publish job attaches the SBOM. Letting this action upload its
+          # own artifact and release asset too gives the release two files of
+          # the same name, and the second upload fails the release.
+          upload-artifact: false
+          upload-release-assets: false
       - uses: actions/upload-artifact@v4
         with:
           name: sbom

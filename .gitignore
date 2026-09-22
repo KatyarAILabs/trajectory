@@ -9,6 +9,10 @@
 /var/
 *.parquet
 !pkg/record/testdata/**/*.parquet
+# The published sample dataset (F-10.5) is data that must ship. Without this
+# exception its Parquet files were silently left out of every commit, and the
+# committed manifests pointed at files that did not exist.
+!spec/testdata/sample-dataset/**/*.parquet
 
 # Editor / OS
 .DS_Store

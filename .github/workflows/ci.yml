@@ -57,9 +57,12 @@ jobs:
         with:
           go-version: '1.26'
           cache: true
+      # Pinned to the exact protoc used to generate the committed code. Its
+      # version is written into every generated file's header, so any other
+      # version makes the staleness check fail on a comment, not on code.
       - uses: arduino/setup-protoc@v3
         with:
-          version: '25.x'
+          version: '33.1'
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - run: make tools

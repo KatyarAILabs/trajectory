@@ -16,8 +16,14 @@ tools: ## Install pinned code-generation and audit tools into ./bin
 	GOBIN=$(BIN) go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.12
 	@echo "licence gate is ./tools/licensecheck; no external tool needed"
 
+# protoc 33.1 exactly: its version is stamped into generated headers, and CI
+# pins the same version so the staleness check compares code, not comments.
+PROTOC_VERSION := 33.1
+
 .PHONY: generate
-generate: ## Regenerate Go types and JSON Schema from the protos
+generate: ## Regenerate Go types and JSON Schema from the protos (needs protoc 33.1)
+	@protoc --version | grep -q "$(PROTOC_VERSION)" || \
+	  { echo "protoc $(PROTOC_VERSION) required, found: $$(protoc --version)"; exit 1; }
 	protoc -I spec/proto --go_out=gen/go --go_opt=module=$(MODULE)/gen/go $(PROTOS)
 	go run ./tools/gen-jsonschema -out spec/jsonschema
 

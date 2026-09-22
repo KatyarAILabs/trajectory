@@ -1,7 +1,4 @@
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/trajectory-readme-banner-dark.png">
-  <img alt="Trajectory — capture every agent trajectory at training fidelity. An open-source project by katyar." src="docs/assets/trajectory-readme-banner-light.png">
-</picture>
+<img alt="Trajectory — capture every agent trajectory at training fidelity. An open-source project by katyar." src="docs/assets/trajectory-readme-banner-light.png">
 
 # Trajectory
 
